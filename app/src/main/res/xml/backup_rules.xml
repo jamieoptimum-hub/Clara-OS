@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+
+    <!-- Encrypted Secret Vault & AndroidX Tink Hardware Keysets -->
+    <exclude domain="sharedpref" path="clara_secret_vault_v1.xml" />
+    <exclude domain="sharedpref" path="clara_encrypted_secrets_v1.xml" />
+    <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_key_keyset__.xml" />
+    <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_value_keyset__.xml" />
+    <exclude domain="sharedpref" path="WebViewChromiumPrefs.xml" />
+
+    <!-- Core Identity, Pairing & Smart Home Session Stores -->
+    <exclude domain="sharedpref" path="clara_installation_identity_v1.xml" />
+    <exclude domain="sharedpref" path="google_home_jarvis_prefs_v10.xml" />
+    <exclude domain="sharedpref" path="clara_direct_pairing_prefs.xml" />
+    <exclude domain="sharedpref" path="clara_native_music_prefs_v7.xml" />
+    <exclude domain="sharedpref" path="clara_ezviz_account_prefs.xml" />
+    <exclude domain="sharedpref" path="clara_imou_camera_prefs_v1.xml" />
+    <exclude domain="sharedpref" path="clara_tplink_tapo_kasa_prefs_v1.xml" />
+    <exclude domain="sharedpref" path="clara_ewelink_sonoff_prefs_v1.xml" />
+    <exclude domain="sharedpref" path="clara_mqtt_broker_prefs_v1.xml" />
+    <exclude domain="sharedpref" path="clara_lg_webos_tv_prefs_v2.xml" />
+    <exclude domain="sharedpref" path="clara_tuya_consumer_session_v1.xml" />
+    <exclude domain="sharedpref" path="clara_vehicle_oauth_sessions_v1.xml" />
+    <exclude domain="sharedpref" path="clara_nest_sdm_prefs_v1.xml" />
+    <exclude domain="sharedpref" path="clara_matter_fabric_prefs_v1.xml" />
+
+    <!-- Local Databases, Internal Files & External Cache Lockdown -->
+    <exclude domain="database" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="external" path="." />
+</full-backup-content>

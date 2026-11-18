@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Network, Wi-Fi Scanning & Multicast Permissions (Required for Tuya/SmartKnight, Matter, Tapo, Sonoff, mDNS & SSID List) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <!-- Location & Nearby Wi-Fi Permissions (Required by Android to read in-range Wi-Fi SSIDs, AP hotspots, mDNS & BLE beacons) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        tools:targetApi="tiramisu" />
+
+    <!-- Bluetooth Permissions (Required for SmartKnight / Tuya BLE + Wi-Fi Combo, Matter BLE Commissioning & BLE Discovery) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+    <!-- Local Storage & Media Permissions (Required to discover & sync Local Photo Folders and Subfolders for Slideshow) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Two-Way Audio, Wake Word Recognition, Foreground Service & Hardware Volume Control -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Auto-Launch on Boot, Screen Attention Presence Wake & Wake Screen on Doorbell Ring -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Allow opening & querying official Smart Home, Camera, Music, Speech Recognition & TTS services on Android 11+ -->
+    <queries>
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.google.android.apps.chromecast.app" />
+        <package android:name="com.nest.android" />
+        <package android:name="com.videogo" />
+        <package android:name="com.ezviz.international" />
+        <package android:name="com.ezviz.ezvizlife" />
+        <package android:name="com.hikvision.ezviz" />
+        <package android:name="com.mm.android.direct.imou" />
+        <package android:name="com.dahua.imou" />
+        <package android:name="com.mm.android.lc" />
+        <package android:name="com.tuya.smart" />
+        <package android:name="com.tuya.smartlife" />
+        <package android:name="com.tplink.iot" />
+        <package android:name="com.tplink.kasa_android" />
+        <package android:name="com.coolkit" />
+        <package android:name="allterco.bg.shelly" />
+        <package android:name="com.philips.lighting.hue2" />
+        <package android:name="com.lgeha.nuts" />
+        <package android:name="com.ringapp" />
+        <package android:name="com.jlr.jaguar.incontrolremote.appstore" />
+        <package android:name="com.daimler.ris.mercedesme.ece.android" />
+        <package android:name="com.plexapp.android" />
+        <package android:name="com.govee.home" />
+        <package android:name="com.twinkly" />
+        <package android:name="com.google.android.gms" />
+
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
+    <application
+        android:name="com.jarvis.smarthomelauncher.core.ClaraApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:hardwareAccelerated="true"
+        android:label="Clara Smart Home"
+        android:largeHeap="true"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:usesCleartextTraffic="true"
+        tools:targetApi="s"
+        tools:replace="android:allowBackup,android:fullBackupContent,android:dataExtractionRules,android:label,android:supportsRtl,android:theme,android:usesCleartextTraffic">
+
+        <activity
+            android:name="com.jarvis.smarthomelauncher.ui.screens.MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:stateNotNeeded="true"
+            android:turnScreenOn="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Auto-Start Receiver when Tablet Boots -->
+        <receiver
+            android:name="com.jarvis.smarthomelauncher.engines.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Real-Time Doorbell Ring Interceptor & Spotify/YouTube Media Session Listener -->
+        <service
+            android:name="com.jarvis.smarthomelauncher.engines.JarvisNotificationListener"
+            android:exported="true"
+            android:label="Jarvis Doorbell &amp; Media Bridge"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.jarvis.smarthomelauncher.services.SmartHomeConnectivityService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Tuya/SmartLife Native SDK Initialization Metadata (Change 6.1) -->
+        <meta-data
+            android:name="THING_SMART_APPKEY"
+            android:value="${TUYA_APP_KEY}" />
+        <meta-data
+            android:name="THING_SMART_SECRET"
+            android:value="${TUYA_APP_SECRET}" />
+
+    </application>
+
+</manifest>

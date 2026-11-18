@@ -1,0 +1,18 @@
+# Preserve all WebView @JavascriptInterface methods & bridge classes
+-keepattributes *Annotation*,JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class com.jarvis.smarthomelauncher.ClaraWebLoginJsBridge { *; }
+-keep class com.jarvis.smarthomelauncher.CloudPhotosJsBridge { *; }
+-keep class com.jarvis.smarthomelauncher.SpotifyHiddenWebPlayer$HiddenBridge { *; }
+
+# Preserve Tuya / ThingClips SDK, FastJSON & JNI classes
+-keep class com.thingclips.** { *; }
+-dontwarn com.thingclips.**
+-keep class com.alibaba.fastjson.** { *; }
+-dontwarn com.alibaba.fastjson.**
+
+# Preserve LibVLC native JNI callbacks
+-keep class org.videolan.libvlc.** { *; }
+-dontwarn org.videolan.libvlc.**
