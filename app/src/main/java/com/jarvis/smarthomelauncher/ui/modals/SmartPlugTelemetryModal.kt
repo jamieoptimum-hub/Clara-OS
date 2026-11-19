@@ -61,7 +61,6 @@ import kotlin.math.roundToInt
 //   any discovered hardware DP / capability to the Hero Card.
 // ---------------------------------------------------------------------------
 /**
- * Change 8.1 + Change 3.2:
  * Lifecycle-aware ViewModel backing device control popups and telemetry modals so single-device
  * refresh & capability sync survive recomposition and configuration changes cleanly.
  */
@@ -138,6 +137,7 @@ class DeviceControlModalViewModel(application: Application) : AndroidViewModel(a
         }
     }
 }
+
 
 @Composable
 fun SmartKnightLiveDpsModal(

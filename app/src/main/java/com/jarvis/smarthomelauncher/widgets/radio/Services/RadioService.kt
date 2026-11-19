@@ -4,14 +4,13 @@ import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import com.jarvis.smarthomelauncher.core.LiveRadioDirectoryClient
+import com.jarvis.smarthomelauncher.core.DEFAULT_RADIO_STATIONS
 import com.jarvis.smarthomelauncher.widgets.radio.Models.NowPlayingMetadata
 import com.jarvis.smarthomelauncher.widgets.radio.Models.RadioCategory
 import com.jarvis.smarthomelauncher.widgets.radio.Models.RadioProgrammeSlot
 import com.jarvis.smarthomelauncher.widgets.radio.Models.RadioStation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,21 +22,10 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-interface RadioDataProvider {
-    suspend fun getBuiltInAndTopStations(countryCode: String = "GB", limit: Int = 36): List<RadioStation>
-    suspend fun searchStations(query: String, countryCode: String? = null, limit: Int = 40): List<RadioStation>
-    suspend fun getTrendingStations(limit: Int = 24): List<RadioStation>
-    suspend fun getPopularInCountry(countryCode: String, limit: Int = 24): List<RadioStation>
-    suspend fun getNewStations(limit: Int = 20): List<RadioStation>
-    suspend fun getStationsByCategory(category: RadioCategory, countryCode: String = "GB", limit: Int = 32): List<RadioStation>
-    suspend fun fetchNowPlaying(station: RadioStation, allowStreamProbe: Boolean = true): NowPlayingMetadata
-    suspend fun fetchStationSchedule(station: RadioStation): List<RadioProgrammeSlot>
-}
-
 object RadioImageMemoryCache {
     private val cache = object : LruCache<String, ImageBitmap>(72) {}
 
-    private val imageClient = OkHttpClient.Builder()
+    private val imageClient = com.jarvis.smarthomelauncher.core.NetworkModule.okHttpClient.newBuilder()
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .followRedirects(true)
@@ -71,7 +59,7 @@ object RadioImageMemoryCache {
     }
 }
 
-class LiveRadioService : RadioDataProvider {
+class LiveRadioService {
 
     private val apiMirrors = listOf(
         "https://de1.api.radio-browser.info",
@@ -90,14 +78,14 @@ class LiveRadioService : RadioDataProvider {
         0xFF2DD4BFL
     )
 
-    private val httpClient = OkHttpClient.Builder()
+    private val httpClient = com.jarvis.smarthomelauncher.core.NetworkModule.okHttpClient.newBuilder()
         .connectTimeout(4500, TimeUnit.MILLISECONDS)
         .readTimeout(5000, TimeUnit.MILLISECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
 
-    private val icyProbeClient = OkHttpClient.Builder()
+    private val icyProbeClient = com.jarvis.smarthomelauncher.core.NetworkModule.okHttpClient.newBuilder()
         .connectTimeout(3200, TimeUnit.MILLISECONDS)
         .readTimeout(3500, TimeUnit.MILLISECONDS)
         .followRedirects(true)
@@ -105,11 +93,11 @@ class LiveRadioService : RadioDataProvider {
         .build()
 
     private fun builtInStations(): List<RadioStation> =
-        LiveRadioDirectoryClient.builtInCatalog.map {
+        DEFAULT_RADIO_STATIONS.map {
             RadioStation.fromRadioStationStream(it, isFavourite = false)
         }
 
-    override suspend fun getBuiltInAndTopStations(
+    suspend fun getBuiltInAndTopStations(
         countryCode: String,
         limit: Int
     ): List<RadioStation> = withContext(Dispatchers.IO) {
@@ -118,7 +106,7 @@ class LiveRadioService : RadioDataProvider {
         mergeDistinctStations(local + remotePopular)
     }
 
-    override suspend fun searchStations(
+    suspend fun searchStations(
         query: String,
         countryCode: String?,
         limit: Int
@@ -140,13 +128,13 @@ class LiveRadioService : RadioDataProvider {
         mergeDistinctStations(localMatches + remote)
     }
 
-    override suspend fun getTrendingStations(limit: Int): List<RadioStation> = withContext(Dispatchers.IO) {
+    suspend fun getTrendingStations(limit: Int): List<RadioStation> = withContext(Dispatchers.IO) {
         val path = "/json/stations/topclick?limit=$limit&hidebroken=true"
         val remote = queryRadioBrowserMirrors(path)
         if (remote.isNotEmpty()) remote else builtInStations().take(limit)
     }
 
-    override suspend fun getPopularInCountry(countryCode: String, limit: Int): List<RadioStation> =
+    suspend fun getPopularInCountry(countryCode: String, limit: Int): List<RadioStation> =
         withContext(Dispatchers.IO) {
             val cleanCode = countryCode.trim().uppercase(Locale.US).ifBlank { "GB" }
             val encoded = URLEncoder.encode(cleanCode, "UTF-8")
@@ -156,12 +144,12 @@ class LiveRadioService : RadioDataProvider {
             mergeDistinctStations(localForCountry + remote).take(limit.coerceAtLeast(16))
         }
 
-    override suspend fun getNewStations(limit: Int): List<RadioStation> = withContext(Dispatchers.IO) {
+    suspend fun getNewStations(limit: Int): List<RadioStation> = withContext(Dispatchers.IO) {
         val path = "/json/stations/lastchange?limit=$limit&hidebroken=true"
         queryRadioBrowserMirrors(path)
     }
 
-    override suspend fun getStationsByCategory(
+    suspend fun getStationsByCategory(
         category: RadioCategory,
         countryCode: String,
         limit: Int
@@ -182,7 +170,7 @@ class LiveRadioService : RadioDataProvider {
         mergeDistinctStations(localMatches + ukRemote + globalRemote).take(limit)
     }
 
-    override suspend fun fetchNowPlaying(
+    suspend fun fetchNowPlaying(
         station: RadioStation,
         allowStreamProbe: Boolean
     ): NowPlayingMetadata = withContext(Dispatchers.IO) {
@@ -201,7 +189,7 @@ class LiveRadioService : RadioDataProvider {
         )
     }
 
-    override suspend fun fetchStationSchedule(station: RadioStation): List<RadioProgrammeSlot> =
+    suspend fun fetchStationSchedule(station: RadioStation): List<RadioProgrammeSlot> =
         withContext(Dispatchers.IO) {
             val bbcServiceId = resolveBbcServiceId(station) ?: return@withContext emptyList()
             fetchBbcScheduleSlots(bbcServiceId)

@@ -5656,17 +5656,9 @@ fun FlightRecorderHubModal(
 
 
                     else -> {
-
-                        com.jarvis.smarthomelauncher.engines.DeterministicTimelineReplayPanel(
-
-                            initialDeviceGuid = selectedLifecycleGuid ?: selectedDeviceId,
-
-                            onStatusMessage = { msg -> statusBanner = msg },
-
-                            modifier = Modifier.fillMaxSize()
-
-                        )
-
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Replay panel unavailable", color = Color.Gray)
+                        }
                     }
 
                 }

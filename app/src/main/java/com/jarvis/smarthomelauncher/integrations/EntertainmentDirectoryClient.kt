@@ -2,10 +2,13 @@ package com.jarvis.smarthomelauncher.integrations
 
 import android.content.Context
 import com.jarvis.smarthomelauncher.core.ClaraEntertainmentStore
+import com.jarvis.smarthomelauncher.core.DEFAULT_TRACKED_MEDIA_SHOWS
 import com.jarvis.smarthomelauncher.core.EntertainmentCastMember
 import com.jarvis.smarthomelauncher.core.EntertainmentEpisode
 import com.jarvis.smarthomelauncher.core.EntertainmentMediaItem
 import com.jarvis.smarthomelauncher.core.EntertainmentMediaKind
+import com.jarvis.smarthomelauncher.core.TrackedMediaKind
+import com.jarvis.smarthomelauncher.core.TrackedMediaShow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -653,5 +656,349 @@ object EntertainmentDirectoryClient {
         val palette = longArrayOf(0xFF00E676L, 0xFF00E5FFL, 0xFFFFAB40L, 0xFF7C4DFFL, 0xFF40C4FFL)
         val idx = (title.hashCode() and 0x7FFFFFFF) % palette.size
         return palette[idx]
+    }
+}
+
+object NextEpisodeDirectoryClient {
+    private val accentColors = listOf(
+        0xFF00E5FFL,
+        0xFFFF006EL,
+        0xFF00E676L,
+        0xFFFFB300L,
+        0xFFE50914L,
+        0xFFC084FCL
+    )
+
+    fun mapNetworkToLgTvAppId(networkName: String, titleHint: String = ""): Pair<String, String> {
+        val lower = "$networkName $titleHint".lowercase(Locale.US)
+        val contentId = ""
+        val appId = when {
+            lower.contains("apple") || lower.contains("ted lasso") || lower.contains("slow horses") ||
+                    lower.contains("severance") || lower.contains("silo") || lower.contains("shrinking") ||
+                    lower.contains("foundation") || lower.contains("morning show") || lower.contains("bad sisters") ->
+                "com.apple.appletv"
+            lower.contains("bbc") || lower.contains("iplayer") || lower.contains("eastenders") ||
+                    lower.contains("traitors") || lower.contains("doctor who") || lower.contains("line of duty") ||
+                    lower.contains("peaky blinders") || lower.contains("strictly") ->
+                "bbc"
+            lower.contains("netflix") || lower.contains("stranger things") || lower.contains("black mirror") ||
+                    lower.contains("squid game") || lower.contains("bridgerton") || lower.contains("wednesday") ||
+                    lower.contains("night agent") || lower.contains("crown") || lower.contains("ozark") ->
+                "netflix"
+            lower.contains("itv") || lower.contains("coronation street") || lower.contains("emmerdale") ||
+                    lower.contains("love island") || lower.contains("vera") || lower.contains("unforgotten") ->
+                "itv.hub"
+            lower.contains("channel 4") || lower.contains("all 4") || lower.contains("e4") ||
+                    lower.contains("film4") || lower.contains("bake off") || lower.contains("gogglebox") ||
+                    lower.contains("taskmaster") ->
+                "all4"
+            lower.contains("disney") || lower.contains("hulu") || lower.contains("fx") ||
+                    lower.contains("mandalorian") || lower.contains("bear") || lower.contains("shogun") ||
+                    lower.contains("andor") || lower.contains("loki") || lower.contains("only murders") ->
+                "com.disney.disneyplus-prod"
+            lower.contains("prime") || lower.contains("amazon") || lower.contains("reacher") ||
+                    lower.contains("clarkson") || lower.contains("boys") || lower.contains("fallout") ||
+                    lower.contains("rings of power") || lower.contains("jack ryan") || lower.contains("grand tour") ->
+                "lovefilm.uk"
+            lower.contains("sky") || lower.contains("hbo") || lower.contains("max") ||
+                    lower.contains("house of the dragon") || lower.contains("last of us") ||
+                    lower.contains("white lotus") || lower.contains("day of the jackal") ->
+                "com.ibo.pro"
+            lower.contains("youtube") ->
+                "youtube.leanback.v4"
+            else ->
+                "com.webos.app.livetv"
+        }
+        return appId to contentId
+    }
+
+    fun normalizeStreamerName(networkOrStreamer: String, appIdHint: String = ""): String {
+        val combinedLower = "${networkOrStreamer.trim()} ${appIdHint.trim()}".lowercase(Locale.US)
+        return when {
+            combinedLower.contains("bbc") || combinedLower.contains("iplayer") -> "BBC iPlayer"
+            combinedLower.contains("apple") -> "Apple TV+"
+            combinedLower.contains("netflix") -> "Netflix"
+            combinedLower.contains("disney") || combinedLower.contains("hulu") || combinedLower.contains("fx") -> "Disney+"
+            combinedLower.contains("prime") || combinedLower.contains("amazon") || combinedLower.contains("lovefilm") -> "Prime Video"
+            combinedLower.contains("itv") -> "ITVX"
+            combinedLower.contains("channel 4") || combinedLower.contains("all 4") || combinedLower.contains("all4") || combinedLower.contains("e4") -> "Channel 4"
+            combinedLower.contains("sky") || combinedLower.contains("hbo") || combinedLower.contains("max") -> "Sky / NOW"
+            combinedLower.contains("paramount") -> "Paramount+"
+            combinedLower.contains("youtube") -> "YouTube"
+            else -> networkOrStreamer.trim().ifBlank { "TV Series" }
+        }
+    }
+
+    fun resolveStreamingBadgeLabel(appIdHint: String, networkOrStreamer: String): String =
+        normalizeStreamerName(networkOrStreamer, appIdHint).take(15)
+
+    private fun formatEpisodeCode(season: Int, number: Int): String {
+        if (season <= 0 && number <= 0) return ""
+        return "S%02dE%02d".format(Locale.US, season.coerceAtLeast(1), number.coerceAtLeast(1))
+    }
+
+    private fun parseAirDateLabel(airdate: String, airtime: String): Pair<String, Long> {
+        if (airdate.isBlank()) return "TBA" to 0L
+        return try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val parsed = sdf.parse(airdate) ?: return airdate to 0L
+            val calAir = Calendar.getInstance().apply { time = parsed }
+            if (airtime.contains(":")) {
+                val h = airtime.substringBefore(":").toIntOrNull() ?: 20
+                val m = airtime.substringAfter(":").take(2).toIntOrNull() ?: 0
+                calAir.set(Calendar.HOUR_OF_DAY, h)
+                calAir.set(Calendar.MINUTE, m)
+            }
+            val calNow = Calendar.getInstance()
+            val sameYear = calNow.get(Calendar.YEAR) == calAir.get(Calendar.YEAR)
+            val dayDiff = calAir.get(Calendar.DAY_OF_YEAR) - calNow.get(Calendar.DAY_OF_YEAR)
+            val timeSuffix = if (airtime.isNotBlank()) " $airtime" else ""
+            val label = when {
+                sameYear && dayDiff == 0 -> "Today$timeSuffix"
+                sameYear && dayDiff == 1 -> "Tomorrow$timeSuffix"
+                sameYear && dayDiff in 2..6 -> {
+                    val dayFmt = SimpleDateFormat("EEE", Locale.getDefault())
+                    "${dayFmt.format(parsed)}$timeSuffix"
+                }
+                else -> {
+                    val outFmt = SimpleDateFormat("d MMM", Locale.getDefault())
+                    "${outFmt.format(parsed)}$timeSuffix"
+                }
+            }
+            label to calAir.timeInMillis
+        } catch (_: Exception) {
+            airdate to 0L
+        }
+    }
+
+    private fun parseTvMazeShowObject(showObj: JSONObject, embeddedNextEp: JSONObject? = null): TrackedMediaShow? {
+        val showId = showObj.optInt("id", 0)
+        val name = showObj.optString("name", "").trim()
+        if (showId <= 0 || name.isBlank()) return null
+
+        val status = showObj.optString("status", "Running").trim()
+        val networkObj = showObj.optJSONObject("network") ?: showObj.optJSONObject("webChannel")
+        val networkName = networkObj?.optString("name", "")?.trim().orEmpty().ifBlank { "TV Series" }
+        val scheduleObj = showObj.optJSONObject("schedule")
+        val scheduleTime = scheduleObj?.optString("time", "").orEmpty()
+        val daysArr = scheduleObj?.optJSONArray("days")
+        val scheduleDays = buildList {
+            if (daysArr != null) {
+                for (i in 0 until daysArr.length()) {
+                    daysArr.optString(i, "").take(3).takeIf { it.isNotBlank() }?.let { add(it) }
+                }
+            }
+        }.joinToString(",")
+
+        val imageObj = showObj.optJSONObject("image")
+        val artwork = imageObj?.optString("medium", imageObj.optString("original", ""))
+            .orEmpty()
+            .replace("http://", "https://")
+
+        val rawSummary = showObj.optString("summary", "")
+            .replace(Regex("<[^>]*>"), "")
+            .trim()
+
+        val embedded = showObj.optJSONObject("_embedded")
+        val nextEp = embeddedNextEp
+            ?: embedded?.optJSONObject("nextepisode")
+            ?: embedded?.optJSONArray("nextepisode")?.optJSONObject(0)
+        val prevEp = embedded?.optJSONObject("previousepisode")
+
+        val epToUse = nextEp ?: prevEp
+        val epCode = if (epToUse != null) {
+            formatEpisodeCode(epToUse.optInt("season", 1), epToUse.optInt("number", 1))
+        } else if (scheduleDays.isNotBlank()) {
+            "$scheduleDays $scheduleTime".trim()
+        } else {
+            status
+        }
+        val epTitle = epToUse?.optString("name", "")?.trim().orEmpty()
+        val (airLabel, airEpoch) = if (nextEp != null) {
+            parseAirDateLabel(nextEp.optString("airdate", ""), nextEp.optString("airtime", scheduleTime))
+        } else if (scheduleDays.isNotBlank() && status.equals("Running", ignoreCase = true)) {
+            "$scheduleDays $scheduleTime".trim() to 0L
+        } else if (prevEp != null) {
+            "Last: ${parseAirDateLabel(prevEp.optString("airdate", ""), "").first}" to 0L
+        } else {
+            status to 0L
+        }
+
+        val (appIdHint, contentIdHint) = mapNetworkToLgTvAppId(networkName, name)
+        val normalizedStreamer = normalizeStreamerName(networkName, appIdHint)
+        return TrackedMediaShow(
+            id = "tvmaze_$showId",
+            externalId = showId.toString(),
+            title = name,
+            kind = TrackedMediaKind.TV_SHOW,
+            networkOrStreamer = normalizedStreamer,
+            statusText = status,
+            nextEpisodeCode = epCode.ifBlank { "Series" },
+            nextEpisodeTitle = epTitle,
+            nextAirDateLabel = airLabel,
+            airTimestampEpochMs = airEpoch,
+            artworkUrl = artwork,
+            summarySnippet = rawSummary,
+            appIdHint = appIdHint,
+            contentIdHint = contentIdHint,
+            accentColorHex = accentColors[showId % accentColors.size]
+        )
+    }
+
+    suspend fun refreshTrackedShowsSchedule(shows: List<TrackedMediaShow>): List<TrackedMediaShow> =
+        withContext(Dispatchers.IO) {
+            shows.map { item ->
+                if (item.kind != TrackedMediaKind.TV_SHOW || item.externalId.isBlank() || !item.externalId.all { it.isDigit() }) {
+                    return@map item
+                }
+                try {
+                    val url = "https://api.tvmaze.com/shows/${item.externalId}?embed[]=nextepisode&embed[]=previousepisode"
+                    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 3500
+                        readTimeout = 3500
+                        setRequestProperty("Accept", "application/json")
+                    }
+                    if (conn.responseCode in 200..299) {
+                        val body = conn.inputStream.bufferedReader().use { it.readText() }
+                        conn.disconnect()
+                        val parsed = parseTvMazeShowObject(JSONObject(body))
+                        if (parsed != null) {
+                            return@map parsed.copy(
+                                id = item.id,
+                                lastWatchedEpisodeCode = item.lastWatchedEpisodeCode,
+                                appIdHint = item.appIdHint.ifBlank { parsed.appIdHint },
+                                contentIdHint = item.contentIdHint.ifBlank { parsed.contentIdHint }
+                            )
+                        }
+                    } else {
+                        conn.disconnect()
+                    }
+                } catch (_: Exception) {
+                }
+                item
+            }
+        }
+
+    suspend fun fetchUkDailySchedule(): List<TrackedMediaShow> =
+        withContext(Dispatchers.IO) {
+            val list = mutableListOf<TrackedMediaShow>()
+            try {
+                val conn = (URL("https://api.tvmaze.com/schedule?country=GB").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    setRequestProperty("Accept", "application/json")
+                }
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    conn.disconnect()
+                    val arr = JSONArray(body)
+                    val seenShowIds = HashSet<Int>()
+                    for (i in 0 until arr.length()) {
+                        val epObj = arr.optJSONObject(i) ?: continue
+                        val showObj = epObj.optJSONObject("show") ?: continue
+                        val showId = showObj.optInt("id", 0)
+                        if (showId <= 0 || !seenShowIds.add(showId)) continue
+                        parseTvMazeShowObject(showObj, embeddedNextEp = epObj)?.let {
+                            list.add(it)
+                        }
+                    }
+                } else {
+                    conn.disconnect()
+                }
+            } catch (_: Exception) {
+            }
+            (DEFAULT_TRACKED_MEDIA_SHOWS + list).distinctBy { it.title.lowercase(Locale.US) }.take(40)
+        }
+
+    suspend fun searchShowsAndMovies(
+        query: String,
+        includeTv: Boolean = true,
+        includeMovies: Boolean = true
+    ): List<TrackedMediaShow> = withContext(Dispatchers.IO) {
+        val clean = query.trim()
+        if (clean.isBlank()) {
+            val schedule = fetchUkDailySchedule()
+            return@withContext schedule.filter {
+                (includeTv && it.kind == TrackedMediaKind.TV_SHOW) ||
+                        (includeMovies && it.kind == TrackedMediaKind.MOVIE)
+            }
+        }
+        val encoded = URLEncoder.encode(clean, "UTF-8")
+        val results = mutableListOf<TrackedMediaShow>()
+
+        if (includeTv) {
+            try {
+                val conn = (URL("https://api.tvmaze.com/search/shows?q=$encoded").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    setRequestProperty("Accept", "application/json")
+                }
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    conn.disconnect()
+                    val arr = JSONArray(body)
+                    for (i in 0 until arr.length().coerceAtMost(18)) {
+                        val showObj = arr.optJSONObject(i)?.optJSONObject("show") ?: continue
+                        parseTvMazeShowObject(showObj)?.let { results.add(it) }
+                    }
+                } else {
+                    conn.disconnect()
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        if (includeMovies) {
+            try {
+                val movieUrl = "https://itunes.apple.com/search?term=$encoded&country=gb&media=movie&entity=movie&limit=14"
+                val conn = (URL(movieUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    setRequestProperty("Accept", "application/json")
+                }
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    conn.disconnect()
+                    val arr = JSONObject(body).optJSONArray("results") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val m = arr.optJSONObject(i) ?: continue
+                        val trackId = m.optLong("trackId", 0L)
+                        val title = m.optString("trackName", "").trim()
+                        if (title.isBlank()) continue
+                        val genre = m.optString("primaryGenreName", "Movie").trim()
+                        val director = m.optString("artistName", "").trim()
+                        val releaseRaw = m.optString("releaseDate", "").substringBefore("T")
+                        val year = releaseRaw.take(4)
+                        val art = m.optString("artworkUrl100", "").replace("100x100bb", "400x400bb")
+                        val desc = m.optString("longDescription", m.optString("shortDescription", "")).trim()
+                        results.add(
+                            TrackedMediaShow(
+                                id = "movie_${trackId}_$i",
+                                externalId = trackId.toString(),
+                                title = title,
+                                kind = TrackedMediaKind.MOVIE,
+                                networkOrStreamer = if (director.isNotBlank()) "$genre \u2022 $director" else genre,
+                                statusText = "Movie",
+                                nextEpisodeCode = if (year.isNotBlank()) "Film ($year)" else "Feature Film",
+                                nextEpisodeTitle = genre,
+                                nextAirDateLabel = if (releaseRaw.isNotBlank()) "Released $year" else "Movie",
+                                artworkUrl = art,
+                                summarySnippet = desc,
+                                appIdHint = "com.apple.appletv",
+                                accentColorHex = 0xFFFFB300L
+                            )
+                        )
+                    }
+                } else {
+                    conn.disconnect()
+                }
+            } catch (_: Exception) {
+            }
+        }
+        results
     }
 }

@@ -153,3 +153,24 @@ val GhTextSecondary: Color
     get() = if (ClaraThemeManager.isDarkMode) Color(0xFF8A909A) else Color(0xFF5F6368)
 
 val GhFont = FontFamily.SansSerif
+
+// Multi-colour spectrum gradient stops for the thermostat & ambient arc
+internal val ThermostatSpectrumColors = listOf(
+    Color(0xFF00E5A3), // Mint Teal
+    Color(0xFF00C6FF), // Electric Cyan
+    Color(0xFF7C4DFF), // Deep Violet
+    Color(0xFFFF4081), // Rose Pink
+    Color(0xFFFF6D00), // Warm Heating Orange
+    Color(0xFF00E5A3)
+)
+
+internal val FullRgbWheelColors = listOf(
+    Color(0xFFFF0000),
+    Color(0xFFFFFF00),
+    Color(0xFF00FF00),
+    Color(0xFF00FFFF),
+    Color(0xFF0000FF),
+    Color(0xFFFF00FF),
+    Color(0xFFFF0000)
+)
+

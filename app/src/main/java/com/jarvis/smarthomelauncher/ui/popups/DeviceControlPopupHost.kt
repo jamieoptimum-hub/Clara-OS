@@ -11,7 +11,7 @@ fun DeviceControlPopupHost(
     bridgeSettings: BridgeSettings,
     availableRooms: List<String>,
     onUpdateTile: (SmartTile) -> Unit,
-    onUpdateBridgeSettings: (BridgeSettings) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onUpdateBridgeSettings: (BridgeSettings) -> Unit,
     onAssignRoom: (String) -> Unit,
     onRequestCreateNewRoom: () -> Unit,
     onUserInteraction: () -> Unit,
@@ -27,69 +27,53 @@ fun DeviceControlPopupHost(
             dismissOnClickOutside = true
         )
     ) {
-        when {
-            tile.isThermostatTile -> {
-                ThermostatPopupTemplate(
-                    tile = tile,
-                    bridgeSettings = bridgeSettings,
-                    availableRooms = availableRooms,
-                    onUpdateTile = onUpdateTile,
-                    onUpdateBridgeSettings = onUpdateBridgeSettings,
-                    onAssignRoom = onAssignRoom,
-                    onRequestCreateNewRoom = onRequestCreateNewRoom,
-                    onUserInteraction = onUserInteraction,
-                    onClose = onClose,
-                    onExpandCameraFullScreen = onExpandCameraFullScreen,
-                    onOpenFullDetailsModal = onOpenFullDetailsModal
-                )
-            }
-            tile.deviceClass == DeviceClass.LIGHT || tile.isAmbientRgbTile -> {
-                LightPopupTemplate(
-                    tile = tile,
-                    bridgeSettings = bridgeSettings,
-                    availableRooms = availableRooms,
-                    onUpdateTile = onUpdateTile,
-                    onUpdateBridgeSettings = onUpdateBridgeSettings,
-                    onAssignRoom = onAssignRoom,
-                    onRequestCreateNewRoom = onRequestCreateNewRoom,
-                    onUserInteraction = onUserInteraction,
-                    onClose = onClose,
-                    onExpandCameraFullScreen = onExpandCameraFullScreen,
-                    onOpenFullDetailsModal = onOpenFullDetailsModal
-                )
-            }
-            tile.deviceSubtype == DeviceSubtype.TV ||
-                    tile.isSpeakerTile ||
-                    tile.isVolumeHeroRequested ||
-                    tile.isRadioHeroRequested -> {
-                MediaPopupTemplate(
-                    tile = tile,
-                    bridgeSettings = bridgeSettings,
-                    availableRooms = availableRooms,
-                    onUpdateTile = onUpdateTile,
-                    onUpdateBridgeSettings = onUpdateBridgeSettings,
-                    onAssignRoom = onAssignRoom,
-                    onRequestCreateNewRoom = onRequestCreateNewRoom,
-                    onUserInteraction = onUserInteraction,
-                    onClose = onClose,
-                    onExpandCameraFullScreen = onExpandCameraFullScreen,
-                    onOpenFullDetailsModal = onOpenFullDetailsModal
-                )
-            }
-            else -> {
-                GenericDevicePopupTemplate(
-                    tile = tile,
-                    bridgeSettings = bridgeSettings,
-                    availableRooms = availableRooms,
-                    onUpdateTile = onUpdateTile,
-                    onUpdateBridgeSettings = onUpdateBridgeSettings,
-                    onAssignRoom = onAssignRoom,
-                    onRequestCreateNewRoom = onRequestCreateNewRoom,
-                    onUserInteraction = onUserInteraction,
-                    onClose = onClose,
-                    onExpandCameraFullScreen = onExpandCameraFullScreen,
-                    onOpenFullDetailsModal = onOpenFullDetailsModal
-                )
+        ModularPopupContainer(
+            tile = tile,
+            availableRooms = availableRooms,
+            onAssignRoom = onAssignRoom,
+            onRequestCreateNewRoom = onRequestCreateNewRoom,
+            onUserInteraction = onUserInteraction,
+            onClose = onClose,
+            onOpenFullDetailsModal = onOpenFullDetailsModal
+        ) {
+            when {
+                tile.isThermostatTile -> {
+                    ModularThermostatPopupContent(
+                        tile = tile,
+                        onUpdateTile = onUpdateTile,
+                        onUserInteraction = onUserInteraction
+                    )
+                }
+                tile.deviceClass == DeviceClass.LIGHT || tile.isAmbientRgbTile -> {
+                    ModularLightAndRgbPopupContent(
+                        tile = tile,
+                        bridgeSettings = bridgeSettings,
+                        onUpdateTile = onUpdateTile,
+                        onUserInteraction = onUserInteraction
+                    )
+                }
+                tile.deviceSubtype == DeviceSubtype.TV ||
+                        tile.isSpeakerTile ||
+                        tile.isVolumeHeroRequested ||
+                        tile.isRadioHeroRequested -> {
+                    ModularMediaPopupContent(
+                        tile = tile,
+                        bridgeSettings = bridgeSettings,
+                        onUpdateTile = onUpdateTile,
+                        onUserInteraction = onUserInteraction,
+                        onOpenFullDetailsModal = onOpenFullDetailsModal
+                    )
+                }
+                else -> {
+                    ModularGenericDevicePopupContent(
+                        tile = tile,
+                        bridgeSettings = bridgeSettings,
+                        onUpdateTile = onUpdateTile,
+                        onUserInteraction = onUserInteraction,
+                        onExpandCameraFullScreen = onExpandCameraFullScreen,
+                        onOpenFullDetailsModal = onOpenFullDetailsModal
+                    )
+                }
             }
         }
     }

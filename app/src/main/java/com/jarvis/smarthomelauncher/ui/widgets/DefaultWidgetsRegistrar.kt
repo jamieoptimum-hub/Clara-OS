@@ -1,25 +1,25 @@
 package com.jarvis.smarthomelauncher.ui.widgets
 
+import android.content.Context
+import android.media.AudioManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import android.content.Context
-import android.media.AudioManager
-import androidx.compose.runtime.rememberCoroutineScope
+import com.jarvis.smarthomelauncher.GhMusicPlayerContent
+import com.jarvis.smarthomelauncher.SfHouseSunkenTileContainer
+import com.jarvis.smarthomelauncher.core.ClaraInAppMusicPlayer
 import com.jarvis.smarthomelauncher.core.DashboardWidgetType
 import com.jarvis.smarthomelauncher.core.DeviceClass
 import com.jarvis.smarthomelauncher.core.DeviceSubtype
 import com.jarvis.smarthomelauncher.core.ServiceClass
 import com.jarvis.smarthomelauncher.core.SmartTile
 import com.jarvis.smarthomelauncher.core.TileType
-import com.jarvis.smarthomelauncher.core.ClaraInAppMusicPlayer
-import com.jarvis.smarthomelauncher.SfHouseSunkenTileContainer
-import com.jarvis.smarthomelauncher.GhMusicPlayerContent
 
 object DefaultWidgetsRegistrar {
     fun initialize() {
@@ -70,16 +70,9 @@ object DefaultWidgetsRegistrar {
             )
         }
 
-        WidgetRegistry.register(DashboardWidgetType.CALENDAR) { context ->
-        }
-
         com.jarvis.smarthomelauncher.widgets.football.Manifest.FootballManifest.register()
         com.jarvis.smarthomelauncher.widgets.radio.Manifest.RadioManifest.register()
         com.jarvis.smarthomelauncher.widgets.commute.Manifest.CommuteManifest.register()
-        com.jarvis.smarthomelauncher.widgets.wifi.Manifest.WifiManifest.register()
-
-        WidgetRegistry.register(DashboardWidgetType.TV_TRACKER) { context ->
-        }
 
         WidgetRegistry.register(DashboardWidgetType.HOME_HEALTH) { context ->
             SfHouseHomeHealthCard(

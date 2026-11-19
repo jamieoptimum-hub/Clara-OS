@@ -84,6 +84,10 @@ dependencies {
     // DocumentFile for SAF Local Photo Folder & Subfolder Tree Traversal (Fix #4)
     implementation("androidx.documentfile:documentfile:1.0.1")
 
+    // Jetpack Room Database for Reliable Single Source of Truth
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+
     // Jetpack Security Crypto for Hardware-Backed EncryptedSharedPreferences Vault (Phase 1.1)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 

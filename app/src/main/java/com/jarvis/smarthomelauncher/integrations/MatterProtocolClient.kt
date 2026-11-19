@@ -676,7 +676,7 @@ object MatterProtocolClient {
         lastMatterServerIp = cleanIp
 
         if (matterOkHttpClient == null) {
-            matterOkHttpClient = okhttp3.OkHttpClient.Builder()
+            matterOkHttpClient = com.jarvis.smarthomelauncher.core.NetworkModule.okHttpClient.newBuilder()
                 .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
         }

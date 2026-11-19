@@ -4,6 +4,7 @@ import com.jarvis.smarthomelauncher.*
 import com.jarvis.smarthomelauncher.core.*
 import com.jarvis.smarthomelauncher.engines.*
 import com.jarvis.smarthomelauncher.integrations.*
+import com.jarvis.smarthomelauncher.ui.viewmodels.OnboardingWizardViewModel
 import com.jarvis.smarthomelauncher.ui.modals.*
 import com.jarvis.smarthomelauncher.ui.popups.*
 import com.jarvis.smarthomelauncher.ui.widgets.*
@@ -93,7 +94,27 @@ fun SetupWizardFullScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    
+    val activity = remember(context) { 
+        generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<androidx.activity.ComponentActivity>()
+            .firstOrNull() 
+    }
+    val wizardVm = remember(activity, context) {
+        if (activity != null) {
+            androidx.lifecycle.ViewModelProvider(activity as androidx.lifecycle.ViewModelStoreOwner)[com.jarvis.smarthomelauncher.ui.viewmodels.OnboardingWizardViewModel::class.java]
+        } else {
+            com.jarvis.smarthomelauncher.ui.viewmodels.OnboardingWizardViewModel(context.applicationContext as android.app.Application)
+        }
+    }
+    
+    // Trigger one-time initialization of the UI state from BridgeSettings
+    LaunchedEffect(bridgeSettings) {
+        wizardVm.initializeSetupUiState(bridgeSettings, initialSection, initialTab)
+    }
 
+    // Temporary UI State moved to wizardVm
+    
     val internalAutomationRules = remember {
         mutableStateListOf<AutomationRule>().apply {
             addAll(DeviceRepository.loadAutomations(context))
@@ -101,306 +122,53 @@ fun SetupWizardFullScreen(
     }
     val automationRules = automationRulesExternal ?: internalAutomationRules
 
-    var activeSidebarSection by remember {
-        mutableStateOf(
-            if (initialTab == SetupPageTab.CONNECTED_DEVICES) SettingsSidebarSection.CUSTOMISE_DASHBOARD
-            else initialSection
-        )
-    }
-
     var showSpeakerGroupsDrawer by remember { mutableStateOf(false) }
     var pendingNestEntryKeyForWebModal by remember { mutableStateOf("") }
     var editingTileIndex by remember { mutableStateOf<Int?>(null) }
-    var statusBanner by remember { mutableStateOf("") }
-
-    var haUrl by remember { mutableStateOf(bridgeSettings.haUrl) }
-    var haToken by remember { mutableStateOf(bridgeSettings.haToken) }
-
-    var imouAppId by remember { mutableStateOf(bridgeSettings.imouAppId) }
-    var imouAppSecret by remember { mutableStateOf(bridgeSettings.imouAppSecret) }
-    var imouApiHost by remember { mutableStateOf(bridgeSettings.imouApiHost) }
-
-    var ezvizAppKey by remember { mutableStateOf(bridgeSettings.ezvizAppKey) }
-    var ezvizAppSecret by remember { mutableStateOf(bridgeSettings.ezvizAppSecret) }
-    var ezvizApiHost by remember { mutableStateOf(bridgeSettings.ezvizApiHost) }
-
-    var nestProjectId by remember { mutableStateOf(bridgeSettings.nestProjectId) }
-    var nestClientId by remember { mutableStateOf(bridgeSettings.nestClientId) }
-    var nestClientSecret by remember { mutableStateOf(bridgeSettings.nestClientSecret) }
-    var nestRefreshToken by remember { mutableStateOf(bridgeSettings.nestRefreshToken) }
-    var nestPubSubSub by remember { mutableStateOf(bridgeSettings.nestPubSubSubscription) }
+    
     var isSigningIntoNest by remember { mutableStateOf(false) }
     var showNestWebLoginModal by remember { mutableStateOf(false) }
-
-    var tuyaAccessId by remember { mutableStateOf(bridgeSettings.tuyaAccessId) }
-    var tuyaAccessSecret by remember { mutableStateOf(bridgeSettings.tuyaAccessSecret) }
-    var tuyaUid by remember { mutableStateOf(bridgeSettings.tuyaUid) }
-
-    var tplinkEmail by remember {
-        mutableStateOf(bridgeSettings.tplinkEmail.ifBlank { TpLinkTapoKasaClient.getSavedTpLinkEmail(context) })
-    }
-    var tplinkPassword by remember {
-        mutableStateOf(bridgeSettings.tplinkPassword.ifBlank { TpLinkTapoKasaClient.getSavedTpLinkPassword(context) })
-    }
-    var ewelinkEmail by remember {
-        mutableStateOf(bridgeSettings.ewelinkEmail.ifBlank { EWeLinkSonoffClient.getSavedEWeLinkEmail(context) })
-    }
-    var ewelinkPassword by remember {
-        mutableStateOf(bridgeSettings.ewelinkPassword.ifBlank { EWeLinkSonoffClient.getSavedEWeLinkPassword(context) })
-    }
-    var mqttBrokerHost by remember {
-        mutableStateOf(bridgeSettings.mqttBrokerHost.ifBlank { MqttAndDiyClient.getMqttHost(context) })
-    }
-    var mqttBrokerPort by remember {
-        mutableIntStateOf(bridgeSettings.mqttBrokerPort.takeIf { it > 0 } ?: MqttAndDiyClient.getMqttPort(context))
-    }
-    var mqttUsername by remember {
-        mutableStateOf(bridgeSettings.mqttUsername.ifBlank { MqttAndDiyClient.getMqttUsername(context) })
-    }
-    var mqttPassword by remember {
-        mutableStateOf(bridgeSettings.mqttPassword.ifBlank { MqttAndDiyClient.getMqttPassword(context) })
-    }
-
-    var selectedMusicProvider by remember { mutableStateOf(bridgeSettings.musicProvider) }
-    var selectedThemeMode by remember { mutableStateOf(bridgeSettings.appThemeMode) }
-    var selectedAccentPreset by remember { mutableStateOf(bridgeSettings.accentColorPreset) }
-    var customAccentColorArgb by remember { mutableLongStateOf(bridgeSettings.customAccentColorArgb) }
-    var selectedClockFaceStyle by remember { mutableStateOf(bridgeSettings.clockFaceStyle) }
-    var selectedHeroTimeoutSec by remember { mutableIntStateOf(bridgeSettings.heroCardTimeoutSeconds) }
-    var keepScreenAwake by remember { mutableStateOf(bridgeSettings.keepScreenAwake) }
-    var selectedSleepTimeoutSec by remember { mutableIntStateOf(bridgeSettings.sleepTimeoutSeconds) }
-    var enablePresenceWake by remember { mutableStateOf(bridgeSettings.enablePresenceWake) }
-    var enableVoiceAnnouncements by remember { mutableStateOf(bridgeSettings.enableVoiceAnnouncements) }
-    var selectedCloudAutoPauseSec by remember { mutableIntStateOf(bridgeSettings.cloudStreamAutoPauseSeconds) }
-    var showRoomLabelsOnTiles by remember { mutableStateOf(bridgeSettings.showRoomLabelsOnTiles) }
-    val customRoomsList = remember {
-        mutableStateListOf<String>().apply { addAll(bridgeSettings.customRooms) }
-    }
-    var dashboardGreetingName by remember { mutableStateOf(bridgeSettings.dashboardGreetingName) }
-
-    var enableVoiceControl by remember { mutableStateOf(bridgeSettings.enableVoiceControl) }
-    var enableWakeWordListening by remember { mutableStateOf(bridgeSettings.enableWakeWordListening) }
-    var voiceWakeWord by remember { mutableStateOf(bridgeSettings.voiceWakeWord) }
-    var localLlmEndpointUrl by remember { mutableStateOf(bridgeSettings.localLlmEndpointUrl) }
-    var smartThingsToken by remember { mutableStateOf(bridgeSettings.smartThingsToken) }
-    var teslaWallConnectorIp by remember { mutableStateOf(bridgeSettings.teslaWallConnectorIp) }
-    var frigateHostUrl by remember { mutableStateOf(bridgeSettings.frigateHostUrl) }
-
-    var enableNestMiniDoorbellChime by remember { mutableStateOf(bridgeSettings.enableNestMiniDoorbellChime) }
-    var nestMiniDoorbellVolume by remember { mutableIntStateOf(bridgeSettings.nestMiniDoorbellVolume) }
-    var doorbellChimeMessage by remember { mutableStateOf(bridgeSettings.doorbellChimeMessage) }
-    var doorbellChimeTargetIps by remember { mutableStateOf(bridgeSettings.doorbellChimeTargetIps) }
-    var customDoorbellMp3Uri by remember { mutableStateOf(bridgeSettings.customDoorbellMp3Uri) }
-    var customAlarmMp3Uri by remember { mutableStateOf(bridgeSettings.customAlarmMp3Uri) }
-
-    var enableSwipeableSlideshowPage by remember { mutableStateOf(bridgeSettings.enableSwipeableSlideshowPage) }
-    var showClockOnSlideshowPage by remember { mutableStateOf(bridgeSettings.showClockOnSlideshowPage) }
-    var slideshowSourceType by remember { mutableStateOf(bridgeSettings.slideshowSourceType) }
-    var slideshowCloudUrl by remember { mutableStateOf(bridgeSettings.slideshowCloudUrl) }
-    val slideshowLocalUris = remember {
-        mutableStateListOf<String>().apply { addAll(bridgeSettings.slideshowLocalUris) }
-    }
-    var slideshowIntervalSeconds by remember { mutableIntStateOf(bridgeSettings.slideshowIntervalSeconds) }
-    var slideshowIncludeSubfolders by remember { mutableStateOf(bridgeSettings.slideshowIncludeSubfolders) }
-    var activeCloudPhotoPickerProvider by remember { mutableStateOf<SlideshowSourceType?>(null) }
-    var showAdvancedSlideshowLinkField by remember { mutableStateOf(false) }
-
-    // Layout Templates, DPI Scaling, Nav Docking, Tariff & RBAC State
-    var selectedDashboardTemplate by remember { mutableStateOf(bridgeSettings.dashboardTemplate) }
-    var dashboardSlotWidgetTypes by remember { mutableStateOf(bridgeSettings.dashboardSlotWidgetTypes) }
-    var dashboardCardWidthWeights by remember { mutableStateOf(bridgeSettings.dashboardCardWidthWeights) }
-    var dashboardCardHeightWeights by remember { mutableStateOf(bridgeSettings.dashboardCardHeightWeights) }
-    var dashboardCardZoomScales by remember { mutableStateOf(bridgeSettings.dashboardCardZoomScales) }
-    var selectedDpiPreset by remember { mutableStateOf(bridgeSettings.dpiScalePreset) }
-    var customDpiScalePct by remember { mutableIntStateOf(bridgeSettings.customDpiScalePct) }
-    var selectedGridSizePreset by remember { mutableStateOf(bridgeSettings.gridSizePreset) }
-    var selectedNavDockPosition by remember { mutableStateOf(bridgeSettings.navDockPosition) }
-    var invertNavOrder by remember { mutableStateOf(bridgeSettings.invertNavOrder) }
-    var activeUserRole by remember { mutableStateOf(bridgeSettings.activeUserRole) }
-    var rolePinCode by remember { mutableStateOf(bridgeSettings.rolePinCode) }
-    var requirePinForAdminAndVehicles by remember { mutableStateOf(bridgeSettings.requirePinForAdminAndVehicles) }
-    var autoOnboardNewDevicesEnabled by remember { mutableStateOf(bridgeSettings.autoOnboardNewDevicesEnabled) }
-
-    var tariffDayRateText by remember {
-        mutableStateOf("%.2f".format(Locale.US, bridgeSettings.electricityTariffDayRateGbp))
-    }
-    var tariffNightRateText by remember {
-        mutableStateOf("%.2f".format(Locale.US, bridgeSettings.electricityTariffNightRateGbp))
-    }
-    var tariffStandingChargeText by remember {
-        mutableStateOf("%.2f".format(Locale.US, bridgeSettings.electricityStandingChargeGbp))
-    }
-    var currencySymbol by remember {
-        mutableStateOf(bridgeSettings.currencySymbol.ifBlank { "\u00A3" })
-    }
-    var offPeakStartHour by remember {
-        mutableIntStateOf(bridgeSettings.offPeakStartHour.coerceIn(0, 23))
-    }
-    var offPeakEndHour by remember {
-        mutableIntStateOf(bridgeSettings.offPeakEndHour.coerceIn(0, 23))
-    }
-    var securityHomeTempText by remember {
-        mutableStateOf("%.1f".format(Locale.US, bridgeSettings.securityHomeTempC))
-    }
-    var securityAwayTempText by remember {
-        mutableStateOf("%.1f".format(Locale.US, bridgeSettings.securityAwayTempC))
-    }
-    var securityNightTempText by remember {
-        mutableStateOf("%.1f".format(Locale.US, bridgeSettings.securityNightTempC))
-    }
-    var securityVacationTempText by remember {
-        mutableStateOf("%.1f".format(Locale.US, bridgeSettings.securityVacationTempC))
-    }
 
     var showSelfHealingLogPanel by remember { mutableStateOf(false) }
     val integrationHealthMap by JarvisLiveBridge.integrationHealthFlow.collectAsState()
     val selfHealingLogs by JarvisLiveBridge.selfHealingLogsFlow.collectAsState()
     val discoveredMeshPeers by JarvisLiveBridge.discoveredMeshPeersFlow.collectAsState()
 
-    fun currentTempBridge(): BridgeSettings {
-        val latestSaved = DeviceRepository.loadBridge(context)
-        return latestSaved.copy(
-            haUrl = haUrl,
-            haToken = haToken,
-            imouAppId = imouAppId,
-            imouAppSecret = imouAppSecret,
-            imouApiHost = imouApiHost,
-            ezvizAppKey = ezvizAppKey,
-            ezvizAppSecret = ezvizAppSecret,
-            ezvizApiHost = ezvizApiHost,
-            nestProjectId = nestProjectId,
-            nestClientId = nestClientId,
-            nestClientSecret = nestClientSecret,
-            nestRefreshToken = nestRefreshToken,
-            nestPubSubSubscription = nestPubSubSub,
-            tuyaAccessId = tuyaAccessId,
-            tuyaAccessSecret = tuyaAccessSecret,
-            tuyaUid = tuyaUid,
-            tplinkEmail = tplinkEmail,
-            tplinkPassword = tplinkPassword,
-            ewelinkEmail = ewelinkEmail,
-            ewelinkPassword = ewelinkPassword,
-            mqttBrokerHost = mqttBrokerHost,
-            mqttBrokerPort = mqttBrokerPort,
-            mqttUsername = mqttUsername,
-            mqttPassword = mqttPassword,
-            jaguarEmail = latestSaved.jaguarEmail.ifBlank { bridgeSettings.jaguarEmail },
-            jaguarPassword = latestSaved.jaguarPassword.ifBlank { bridgeSettings.jaguarPassword },
-            jaguarPin = latestSaved.jaguarPin.ifBlank { bridgeSettings.jaguarPin },
-            jaguarVin = latestSaved.jaguarVin.ifBlank { bridgeSettings.jaguarVin },
-            mercedesEmail = latestSaved.mercedesEmail.ifBlank { bridgeSettings.mercedesEmail },
-            mercedesPassword = latestSaved.mercedesPassword.ifBlank { bridgeSettings.mercedesPassword },
-            mercedesPin = latestSaved.mercedesPin.ifBlank { bridgeSettings.mercedesPin },
-            mercedesVin = latestSaved.mercedesVin.ifBlank { bridgeSettings.mercedesVin },
-            lytmiIpAddress = latestSaved.lytmiIpAddress.ifBlank { bridgeSettings.lytmiIpAddress },
-            lytmiDeviceId = latestSaved.lytmiDeviceId.ifBlank { bridgeSettings.lytmiDeviceId },
-            lytmiLocalKey = latestSaved.lytmiLocalKey.ifBlank { bridgeSettings.lytmiLocalKey },
-            goveeApiKey = latestSaved.goveeApiKey.ifBlank { bridgeSettings.goveeApiKey },
-            goveeIpAddress = latestSaved.goveeIpAddress.ifBlank { bridgeSettings.goveeIpAddress },
-            twinklyIpAddress = latestSaved.twinklyIpAddress.ifBlank { bridgeSettings.twinklyIpAddress },
-            plexServerUrl = latestSaved.plexServerUrl.ifBlank { bridgeSettings.plexServerUrl },
-            plexToken = latestSaved.plexToken.ifBlank { bridgeSettings.plexToken },
-            musicProvider = selectedMusicProvider,
-            appThemeMode = selectedThemeMode,
-            accentColorPreset = selectedAccentPreset,
-            customAccentColorArgb = customAccentColorArgb,
-            clockFaceStyle = selectedClockFaceStyle,
-            heroCardTimeoutSeconds = selectedHeroTimeoutSec,
-            keepScreenAwake = keepScreenAwake,
-            sleepTimeoutSeconds = selectedSleepTimeoutSec,
-            enablePresenceWake = enablePresenceWake,
-            enableVoiceAnnouncements = enableVoiceAnnouncements,
-            cloudStreamAutoPauseSeconds = selectedCloudAutoPauseSec,
-            showRoomLabelsOnTiles = showRoomLabelsOnTiles,
-            customRooms = customRoomsList.toList(),
-            dashboardGreetingName = dashboardGreetingName,
-            enableVoiceControl = enableVoiceControl,
-            enableWakeWordListening = enableWakeWordListening,
-            voiceWakeWord = voiceWakeWord,
-            enableNestMiniDoorbellChime = enableNestMiniDoorbellChime,
-            nestMiniDoorbellVolume = nestMiniDoorbellVolume,
-            doorbellChimeMessage = doorbellChimeMessage,
-            doorbellChimeTargetIps = doorbellChimeTargetIps,
-            customDoorbellMp3Uri = customDoorbellMp3Uri,
-            customAlarmMp3Uri = customAlarmMp3Uri,
-            enableSwipeableSlideshowPage = enableSwipeableSlideshowPage,
-            showClockOnSlideshowPage = showClockOnSlideshowPage,
-            slideshowSourceType = slideshowSourceType,
-            slideshowCloudUrl = slideshowCloudUrl,
-            slideshowLocalUris = slideshowLocalUris.toList(),
-            slideshowIntervalSeconds = slideshowIntervalSeconds,
-            slideshowIncludeSubfolders = slideshowIncludeSubfolders,
-            dashboardCardOrder = latestSaved.dashboardCardOrder.ifEmpty { bridgeSettings.dashboardCardOrder },
-            dashboardCardWidthWeights = dashboardCardWidthWeights,
-            dashboardCardHeightWeights = dashboardCardHeightWeights,
-            dashboardCardZoomScales = dashboardCardZoomScales,
-            dashboardSlotWidgetTypes = dashboardSlotWidgetTypes,
-            dpiScalePreset = selectedDpiPreset,
-            customDpiScalePct = customDpiScalePct,
-            gridSizePreset = selectedGridSizePreset,
-            dashboardTemplate = selectedDashboardTemplate,
-            navDockPosition = selectedNavDockPosition,
-            invertNavOrder = invertNavOrder,
-            activeUserRole = activeUserRole,
-            rolePinCode = rolePinCode,
-            requirePinForAdminAndVehicles = requirePinForAdminAndVehicles,
-            autoOnboardNewDevicesEnabled = autoOnboardNewDevicesEnabled,
-            userProfiles = latestSaved.userProfiles.ifEmpty { bridgeSettings.userProfiles },
-            activeUserProfileId = latestSaved.activeUserProfileId.ifBlank { bridgeSettings.activeUserProfileId },
-            customRadioStations = latestSaved.customRadioStations,
-            activeRadioStationId = latestSaved.activeRadioStationId.ifBlank { bridgeSettings.activeRadioStationId },
-            electricityTariffDayRateGbp = tariffDayRateText.toFloatOrNull() ?: bridgeSettings.electricityTariffDayRateGbp,
-            electricityTariffNightRateGbp = tariffNightRateText.toFloatOrNull() ?: bridgeSettings.electricityTariffNightRateGbp,
-            electricityStandingChargeGbp = tariffStandingChargeText.toFloatOrNull() ?: bridgeSettings.electricityStandingChargeGbp,
-            currencySymbol = currencySymbol.ifBlank { "\u00A3" },
-            offPeakStartHour = offPeakStartHour.coerceIn(0, 23),
-            offPeakEndHour = offPeakEndHour.coerceIn(0, 23),
-            securityCenterMode = latestSaved.securityCenterMode,
-            securityHomeTempC = (securityHomeTempText.toFloatOrNull() ?: bridgeSettings.securityHomeTempC).coerceIn(5f, 35f),
-            securityAwayTempC = (securityAwayTempText.toFloatOrNull() ?: bridgeSettings.securityAwayTempC).coerceIn(5f, 35f),
-            securityNightTempC = (securityNightTempText.toFloatOrNull() ?: bridgeSettings.securityNightTempC).coerceIn(5f, 35f),
-            securityVacationTempC = (securityVacationTempText.toFloatOrNull() ?: bridgeSettings.securityVacationTempC).coerceIn(5f, 35f),
-            localLlmEndpointUrl = localLlmEndpointUrl,
-            smartThingsToken = smartThingsToken.trim(),
-            frigateHostUrl = frigateHostUrl.trim(),
-            teslaAccessToken = latestSaved.teslaAccessToken.ifBlank { bridgeSettings.teslaAccessToken },
-            teslaVin = latestSaved.teslaVin.ifBlank { bridgeSettings.teslaVin },
-            teslaWallConnectorIp = teslaWallConnectorIp.trim()
-        )
-    }
-
     LaunchedEffect(
-        haUrl, haToken, imouAppId, imouAppSecret, ezvizAppKey, ezvizAppSecret,
-        nestRefreshToken, tuyaAccessId, tuyaAccessSecret, tuyaUid,
-        tplinkEmail, tplinkPassword, ewelinkEmail, ewelinkPassword,
-        mqttBrokerHost, mqttBrokerPort, mqttUsername, mqttPassword,
-        selectedMusicProvider, selectedThemeMode, selectedAccentPreset, customAccentColorArgb,
-        selectedClockFaceStyle, selectedHeroTimeoutSec,
-        keepScreenAwake, selectedSleepTimeoutSec, enablePresenceWake,
-        enableVoiceAnnouncements, selectedCloudAutoPauseSec, showRoomLabelsOnTiles, customRoomsList.toList(),
-        dashboardGreetingName, enableVoiceControl, enableWakeWordListening, voiceWakeWord,
-        localLlmEndpointUrl, smartThingsToken, teslaWallConnectorIp, frigateHostUrl,
-        enableNestMiniDoorbellChime, nestMiniDoorbellVolume, doorbellChimeMessage,
-        doorbellChimeTargetIps, customDoorbellMp3Uri, customAlarmMp3Uri,
-        enableSwipeableSlideshowPage, showClockOnSlideshowPage,
-        slideshowSourceType, slideshowCloudUrl, slideshowLocalUris.toList(), slideshowIntervalSeconds, slideshowIncludeSubfolders,
-        selectedDashboardTemplate, dashboardSlotWidgetTypes,
-        dashboardCardWidthWeights, dashboardCardHeightWeights, dashboardCardZoomScales,
-        selectedDpiPreset, customDpiScalePct, selectedGridSizePreset,
-        selectedNavDockPosition, invertNavOrder, activeUserRole, rolePinCode, requirePinForAdminAndVehicles,
-        autoOnboardNewDevicesEnabled,
-        tariffDayRateText, tariffNightRateText, tariffStandingChargeText,
-        currencySymbol, offPeakStartHour, offPeakEndHour,
-        securityHomeTempText, securityAwayTempText, securityNightTempText, securityVacationTempText
+        wizardVm.haUrl, wizardVm.haToken, wizardVm.imouAppId, wizardVm.imouAppSecret, wizardVm.imouApiHost,
+        wizardVm.ezvizAppKey, wizardVm.ezvizAppSecret, wizardVm.ezvizApiHost,
+        wizardVm.nestProjectId, wizardVm.nestClientId, wizardVm.nestClientSecret, wizardVm.nestRefreshToken, wizardVm.nestPubSubSubscription,
+        wizardVm.tuyaAccessId, wizardVm.tuyaAccessSecret, wizardVm.tuyaUid,
+        wizardVm.tplinkEmail, wizardVm.tplinkPassword, wizardVm.ewelinkEmail, wizardVm.ewelinkPassword,
+        wizardVm.mqttBrokerHost, wizardVm.mqttBrokerPort, wizardVm.mqttUsername, wizardVm.mqttPassword,
+        wizardVm.selectedMusicProvider, wizardVm.selectedThemeMode, wizardVm.selectedAccentPreset, wizardVm.customAccentColorArgb,
+        wizardVm.selectedClockFaceStyle, wizardVm.selectedHeroTimeoutSec, wizardVm.keepScreenAwake, wizardVm.selectedSleepTimeoutSec,
+        wizardVm.enablePresenceWake, wizardVm.enableVoiceAnnouncements, wizardVm.selectedCloudAutoPauseSec,
+        wizardVm.showRoomLabelsOnTiles, wizardVm.customRoomsList, wizardVm.dashboardGreetingName,
+        wizardVm.enableVoiceControl, wizardVm.enableWakeWordListening, wizardVm.voiceWakeWord,
+        wizardVm.localLlmEndpointUrl, wizardVm.smartThingsToken, wizardVm.teslaWallConnectorIp, wizardVm.frigateHostUrl,
+        wizardVm.enableNestMiniDoorbellChime, wizardVm.nestMiniDoorbellVolume, wizardVm.doorbellChimeMessage,
+        wizardVm.doorbellChimeTargetIps, wizardVm.customDoorbellMp3Uri, wizardVm.customAlarmMp3Uri,
+        wizardVm.enableSwipeableSlideshowPage, wizardVm.showClockOnSlideshowPage, wizardVm.slideshowSourceType,
+        wizardVm.slideshowCloudUrl, wizardVm.slideshowLocalUris, wizardVm.slideshowIntervalSeconds, wizardVm.slideshowIncludeSubfolders,
+        wizardVm.selectedDashboardTemplate, wizardVm.dashboardSlotWidgetTypes, wizardVm.dashboardCardWidthWeights,
+        wizardVm.dashboardCardHeightWeights, wizardVm.dashboardCardZoomScales,
+        wizardVm.selectedDpiPreset, wizardVm.customDpiScalePct, wizardVm.selectedGridSizePreset,
+        wizardVm.selectedNavDockPosition, wizardVm.invertNavOrder, wizardVm.activeUserRole, wizardVm.rolePinCode, wizardVm.requirePinForAdminAndVehicles,
+        wizardVm.autoOnboardNewDevicesEnabled,
+        wizardVm.tariffDayRateText, wizardVm.tariffNightRateText, wizardVm.tariffStandingChargeText,
+        wizardVm.currencySymbol, wizardVm.offPeakStartHour, wizardVm.offPeakEndHour,
+        wizardVm.securityHomeTempText, wizardVm.securityAwayTempText, wizardVm.securityNightTempText, wizardVm.securityVacationTempText
     ) {
         delay(250L)
-        DeviceRepository.saveBridge(context, currentTempBridge())
+        DeviceRepository.saveBridge(context, wizardVm.currentTempBridge(bridgeSettings))
     }
 
     val settingsPhotoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
+            val newList = wizardVm.slideshowLocalUris.toMutableList()
             uris.forEach { uri ->
                 try {
                     context.contentResolver.takePersistableUriPermission(
@@ -410,14 +178,15 @@ fun SetupWizardFullScreen(
                 } catch (_: Exception) {
                 }
                 val str = uri.toString()
-                if (str !in slideshowLocalUris) {
-                    slideshowLocalUris.add(str)
+                if (str !in newList) {
+                    newList.add(str)
                 }
             }
             PhotoSlideshowResolver.clearCloudCache()
-            val updated = currentTempBridge().copy(slideshowLocalUris = slideshowLocalUris.toList())
+            wizardVm.slideshowLocalUris = newList
+            val updated = wizardVm.currentTempBridge(bridgeSettings)
             DeviceRepository.saveBridge(context, updated)
-            statusBanner = "SUCCESS: Selected ${slideshowLocalUris.size} local photo(s) for slideshow!"
+            wizardVm.statusBanner = "SUCCESS: Selected ${newList.size} local photo(s) for slideshow!"
         }
     }
 
@@ -432,9 +201,9 @@ fun SetupWizardFullScreen(
                 )
             } catch (_: Exception) {
             }
-            customDoorbellMp3Uri = uri.toString()
-            JarvisLiveBridge.activeCustomMp3Uri = customDoorbellMp3Uri
-            statusBanner = "SUCCESS: Selected custom Doorbell MP3 file!"
+            wizardVm.customDoorbellMp3Uri = uri.toString()
+            JarvisLiveBridge.activeCustomMp3Uri = wizardVm.customDoorbellMp3Uri
+            wizardVm.statusBanner = "SUCCESS: Selected custom Doorbell MP3 file!"
         }
     }
 
@@ -449,8 +218,8 @@ fun SetupWizardFullScreen(
                 )
             } catch (_: Exception) {
             }
-            customAlarmMp3Uri = uri.toString()
-            statusBanner = "SUCCESS: Selected custom Security Alarm MP3 file!"
+            wizardVm.customAlarmMp3Uri = uri.toString()
+            wizardVm.statusBanner = "SUCCESS: Selected custom Security Alarm MP3 file!"
         }
     }
 
@@ -472,9 +241,9 @@ fun SetupWizardFullScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            statusBanner = "Microphone permission granted! Hands-free '$voiceWakeWord' voice control is active."
+            wizardVm.statusBanner = "Microphone permission granted! Hands-free '${wizardVm.voiceWakeWord}' voice control is active."
         } else {
-            statusBanner = "Microphone permission is required for voice control."
+            wizardVm.statusBanner = "Microphone permission is required for voice control."
         }
     }
 
@@ -484,7 +253,7 @@ fun SetupWizardFullScreen(
             isScanningCastSpeakers = true
             val found = GoogleCastLanClient.discoverCastDevices(context)
             isScanningCastSpeakers = false
-            statusBanner = if (found.isNotEmpty()) {
+            wizardVm.statusBanner = if (found.isNotEmpty()) {
                 "Found ${found.size} speaker(s) on your Wi-Fi!"
             } else {
                 "No speakers found yet. Ensure your speakers are powered on and connected to Wi-Fi."
@@ -497,9 +266,9 @@ fun SetupWizardFullScreen(
     fun syncDiscoveredNestThermostatsToDashboard() {
         val preservedRefresh = com.jarvis.smarthomelauncher.core.ClaraSecretVault
             .getNestSdmRefreshToken(context)
-            ?: nestRefreshToken.takeIf { it.isNotBlank() && it != "nest_web_session_active" }.orEmpty()
-        nestRefreshToken = preservedRefresh
-        val updatedBridge = currentTempBridge().copy(nestRefreshToken = preservedRefresh)
+            ?: wizardVm.nestRefreshToken.takeIf { it.isNotBlank() && it != "nest_web_session_active" }.orEmpty()
+        wizardVm.nestRefreshToken = preservedRefresh
+        val updatedBridge = wizardVm.currentTempBridge(bridgeSettings).copy(nestRefreshToken = preservedRefresh)
         DeviceRepository.saveBridge(context, updatedBridge)
         PlayerBackgroundScope.launch {
             val discoverRes = NestSdmApiClient.discoverNestDevices(updatedBridge)
@@ -512,7 +281,7 @@ fun SetupWizardFullScreen(
                         val nestIdentity = ResolvedDeviceIdentity(
                             identityKey = "id_cloud_${nd.deviceName.lowercase(Locale.US)}",
                             displayName = nd.displayName,
-                            suggestedRoom = nd.roomName.ifBlank { inferRoomFromDeviceTitle(nd.displayName, customRoomsList) },
+                            suggestedRoom = nd.roomName.ifBlank { inferRoomFromDeviceTitle(nd.displayName, wizardVm.customRoomsList) },
                             deviceClass = nd.suggestedType.toSemanticDeviceClass(),
                             suggestedType = nd.suggestedType,
                             combinedConfidence = 0.96f,
@@ -544,9 +313,9 @@ fun SetupWizardFullScreen(
                     if (count > 0) {
                         DeviceRepository.saveTiles(context, tiles)
                     }
-                    statusBanner = "SUCCESS: Imported $count Google Nest Thermostat(s) to your dashboard!"
+                    wizardVm.statusBanner = "SUCCESS: Imported $count Google Nest Thermostat(s) to your dashboard!"
                 } else {
-                    statusBanner = "Wait for your thermostats to load on the Nest screen, then tap 'Done & Import to Clara'."
+                    wizardVm.statusBanner = "Wait for your thermostats to load on the Nest screen, then tap 'Done & Import to Clara'."
                 }
             }
         }
@@ -562,7 +331,7 @@ fun SetupWizardFullScreen(
     val handleFinishAndCloseWizard = {
         TuyaDirectPairingManager.stopPairing()
         CameraStreamSessionManager.muteAll()
-        val updated = currentTempBridge()
+        val updated = wizardVm.currentTempBridge(bridgeSettings)
         DeviceRepository.saveBridge(context, updated)
         DeviceRepository.saveTiles(context, tiles)
         DeviceRepository.saveAutomations(context, automationRules)
@@ -585,7 +354,7 @@ fun SetupWizardFullScreen(
 
         @Composable
         fun ColumnScope.RenderActiveSectionContent() {
-            if (statusBanner.isNotBlank()) {
+            if (wizardVm.statusBanner.isNotBlank()) {
                 Surface(
                     color = GhTileSurfaceElevated,
                     shape = RoundedCornerShape(12.dp),
@@ -600,21 +369,21 @@ fun SetupWizardFullScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = statusBanner,
-                            color = if (statusBanner.startsWith("SUCCESS") || statusBanner.startsWith("Added") || statusBanner.startsWith("Saved") || statusBanner.startsWith("Paired") || statusBanner.startsWith("Connected") || statusBanner.startsWith("Executed") || statusBanner.startsWith("Found") || statusBanner.startsWith("Tested") || statusBanner.startsWith("Accent") || statusBanner.startsWith("Hero") || statusBanner.startsWith("Clock") || statusBanner.startsWith("Applied") || statusBanner.startsWith("Self-Healing") || statusBanner.startsWith("Digital"))
+                            text = wizardVm.statusBanner,
+                            color = if (wizardVm.statusBanner.startsWith("SUCCESS") || wizardVm.statusBanner.startsWith("Added") || wizardVm.statusBanner.startsWith("Saved") || wizardVm.statusBanner.startsWith("Paired") || wizardVm.statusBanner.startsWith("Connected") || wizardVm.statusBanner.startsWith("Executed") || wizardVm.statusBanner.startsWith("Found") || wizardVm.statusBanner.startsWith("Tested") || wizardVm.statusBanner.startsWith("Accent") || wizardVm.statusBanner.startsWith("Hero") || wizardVm.statusBanner.startsWith("Clock") || wizardVm.statusBanner.startsWith("Applied") || wizardVm.statusBanner.startsWith("Self-Healing") || wizardVm.statusBanner.startsWith("Digital"))
                                 GhAccentGreen else GhAccentWarm,
                             fontSize = 12.sp,
                             fontFamily = GhFont,
                             modifier = Modifier.weight(1f)
                         )
-                        IconButton(onClick = { statusBanner = "" }, modifier = Modifier.size(22.dp)) {
+                        IconButton(onClick = { wizardVm.statusBanner = "" }, modifier = Modifier.size(22.dp)) {
                             Icon(Icons.Default.Close, contentDescription = null, tint = GhTextSecondary, modifier = Modifier.size(14.dp))
                         }
                     }
                 }
             }
 
-            when (activeSidebarSection) {
+            when (wizardVm.activeSidebarSection) {
                 // =============================================================
                 // SECTION 1: DETERMINISTIC SINGLE-DEVICE ONBOARDING WIZARD
                 // =============================================================
@@ -676,13 +445,13 @@ fun SetupWizardFullScreen(
                                 onTestChimeOnTile = { targetTile ->
                                     GoogleCastLanClient.playDoorbellChimeOnNestMinis(
                                         scope = scope,
-                                        bridge = currentTempBridge(),
+                                        bridge = wizardVm.currentTempBridge(bridgeSettings),
                                         tiles = listOf(targetTile),
-                                        customAnnouncementText = doorbellChimeMessage
+                                        customAnnouncementText = wizardVm.doorbellChimeMessage
                                     )
-                                    statusBanner = "Playing doorbell chime on '${targetTile.title}'..."
+                                    wizardVm.statusBanner = "Playing doorbell chime on '${targetTile.title}'..."
                                 },
-                                onStatusBanner = { statusBanner = it }
+                                onStatusBanner = { wizardVm.statusBanner = it }
                             )
                         } else {
                             UnifiedScanAllTab(
@@ -690,10 +459,10 @@ fun SetupWizardFullScreen(
                                 tiles = tiles,
                                 compactInputTextStyle = compactInputTextStyle,
                                 onSetHaUrl = { newUrl ->
-                                    haUrl = newUrl
-                                    statusBanner = "Connected to Home Assistant!"
+                                    wizardVm.haUrl = newUrl
+                                    wizardVm.statusBanner = "Connected to Home Assistant!"
                                 },
-                                onStatusBanner = { statusBanner = it }
+                                onStatusBanner = { wizardVm.statusBanner = it }
                             )
                         }
                     }
@@ -715,11 +484,11 @@ fun SetupWizardFullScreen(
                         context = context,
                         tiles = tiles,
                         automationRules = automationRules,
-                        bridgeSettings = currentTempBridge(),
+                        bridgeSettings = wizardVm.currentTempBridge(bridgeSettings),
                         audioManager = audioManager,
                         compactInputTextStyle = compactInputTextStyle,
                         onSpeak = onSpeak,
-                        onStatusBanner = { statusBanner = it }
+                        onStatusBanner = { wizardVm.statusBanner = it }
                     )
                 }
 
@@ -728,10 +497,10 @@ fun SetupWizardFullScreen(
                         context = context,
                         tiles = tiles,
                         automationRules = automationRules,
-                        bridgeSettings = currentTempBridge(),
+                        bridgeSettings = wizardVm.currentTempBridge(bridgeSettings),
                         isCompactMobile = isCompactMobile,
                         compactInputTextStyle = compactInputTextStyle,
-                        onStatusBanner = { statusBanner = it }
+                        onStatusBanner = { wizardVm.statusBanner = it }
                     )
                 }
 
@@ -810,17 +579,17 @@ fun SetupWizardFullScreen(
                                     )
 
                                     InteractiveRgbColorWheelPicker(
-                                        currentColorArgb = customAccentColorArgb,
-                                        selectedPreset = selectedAccentPreset,
+                                        currentColorArgb = wizardVm.customAccentColorArgb,
+                                        selectedPreset = wizardVm.selectedAccentPreset,
                                         isCompactMobile = isCompactMobile,
                                         onColorSelected = { newArgb, matchedPreset ->
-                                            customAccentColorArgb = newArgb
+                                            wizardVm.customAccentColorArgb = newArgb
                                             if (matchedPreset != null) {
-                                                selectedAccentPreset = matchedPreset
+                                                wizardVm.selectedAccentPreset = matchedPreset
                                             }
                                             DeviceRepository.applyThemeMode(
-                                                mode = selectedThemeMode,
-                                                accentPreset = selectedAccentPreset,
+                                                mode = wizardVm.selectedThemeMode,
+                                                accentPreset = wizardVm.selectedAccentPreset,
                                                 customAccentColorArgb = newArgb
                                             )
                                         }
@@ -833,13 +602,13 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Hero Card Auto-Revert Timer (When a Tile is Clicked)",
-                                                selectedText = heroTimeoutOptions.firstOrNull { it.first == selectedHeroTimeoutSec }?.second
-                                                    ?: "$selectedHeroTimeoutSec Seconds",
+                                                selectedText = heroTimeoutOptions.firstOrNull { it.first == wizardVm.selectedHeroTimeoutSec }?.second
+                                                    ?: "$wizardVm.selectedHeroTimeoutSec Seconds",
                                                 options = heroTimeoutOptions,
                                                 optionLabel = { it.second },
                                                 onOptionSelected = { (sec, label) ->
-                                                    selectedHeroTimeoutSec = sec
-                                                    statusBanner = "Hero Card timer set to $label"
+                                                    wizardVm.selectedHeroTimeoutSec = sec
+                                                    wizardVm.statusBanner = "Hero Card timer set to $label"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -848,13 +617,13 @@ fun SetupWizardFullScreen(
                                         secondContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Dashboard Clock Face Style (7 Styles)",
-                                                selectedText = selectedClockFaceStyle.label,
+                                                selectedText = wizardVm.selectedClockFaceStyle.label,
                                                 options = ClockFaceStyle.entries,
                                                 optionLabel = { it.label },
                                                 optionSubtitle = { it.subtitle },
                                                 onOptionSelected = { style ->
-                                                    selectedClockFaceStyle = style
-                                                    statusBanner = "Clock face updated to ${style.label}"
+                                                    wizardVm.selectedClockFaceStyle = style
+                                                    wizardVm.statusBanner = "Clock face updated to ${style.label}"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -890,16 +659,16 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Dashboard Layout Template (Interchangeable Cards)",
-                                                selectedText = selectedDashboardTemplate.label,
+                                                selectedText = wizardVm.selectedDashboardTemplate.label,
                                                 options = DashboardTemplate.entries,
                                                 optionLabel = { it.label },
                                                 optionSubtitle = { it.subtitle },
                                                 onOptionSelected = { template ->
-                                                    selectedDashboardTemplate = template
-                                                    dashboardSlotWidgetTypes = template.slotWidgets
-                                                    dashboardCardWidthWeights = template.widthWeights
-                                                    dashboardCardHeightWeights = template.heightWeights
-                                                    statusBanner = "Applied template: ${template.label}"
+                                                    wizardVm.selectedDashboardTemplate = template
+                                                    wizardVm.dashboardSlotWidgetTypes = template.slotWidgets
+                                                    wizardVm.dashboardCardWidthWeights = template.widthWeights
+                                                    wizardVm.dashboardCardHeightWeights = template.heightWeights
+                                                    wizardVm.statusBanner = "Applied template: ${template.label}"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -908,12 +677,12 @@ fun SetupWizardFullScreen(
                                         secondContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Navigation Bar Dock Position (Left / Right / Top / Bottom)",
-                                                selectedText = selectedNavDockPosition.label,
+                                                selectedText = wizardVm.selectedNavDockPosition.label,
                                                 options = NavDockPosition.entries,
                                                 optionLabel = { it.label },
                                                 onOptionSelected = { pos ->
-                                                    selectedNavDockPosition = pos
-                                                    statusBanner = "Navigation bar docked to ${pos.label}"
+                                                    wizardVm.selectedNavDockPosition = pos
+                                                    wizardVm.statusBanner = "Navigation bar docked to ${pos.label}"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -923,14 +692,14 @@ fun SetupWizardFullScreen(
 
                                     CleanDropdownSelector(
                                         label = "Dashboard Grid Size & Tile Density (6\u00D73 / 8\u00D74 / 10\u00D75 / 12\u00D76)",
-                                        selectedText = "${selectedGridSizePreset.label} \u2014 ${selectedGridSizePreset.subtitle}",
+                                        selectedText = wizardVm.selectedGridSizePreset.label,
                                         options = DashboardGridSizePreset.entries,
                                         optionLabel = { it.label },
                                         optionSubtitle = { it.subtitle },
                                         onOptionSelected = { preset ->
-                                            selectedGridSizePreset = preset
-                                            DeviceRepository.saveBridge(context, currentTempBridge().copy(gridSizePreset = preset))
-                                            statusBanner = "Grid size set to ${preset.label}"
+                                            wizardVm.selectedGridSizePreset = preset
+                                            DeviceRepository.saveBridge(context, wizardVm.currentTempBridge(bridgeSettings).copy(gridSizePreset = preset))
+                                            wizardVm.statusBanner = "Grid size set to ${preset.label}"
                                         },
                                         textStyle = compactInputTextStyle,
                                         modifier = Modifier.fillMaxWidth()
@@ -941,15 +710,15 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Global Viewport DPI Scale Preset",
-                                                selectedText = selectedDpiPreset.label,
+                                                selectedText = wizardVm.selectedDpiPreset.label,
                                                 options = DpiScalePreset.entries,
                                                 optionLabel = { it.label },
                                                 onOptionSelected = { preset ->
-                                                    selectedDpiPreset = preset
+                                                    wizardVm.selectedDpiPreset = preset
                                                     if (preset != DpiScalePreset.CUSTOM) {
-                                                        customDpiScalePct = (preset.scaleFactor * 100f).roundToInt()
+                                                        wizardVm.customDpiScalePct = (preset.scaleFactor * 100f).roundToInt()
                                                     }
-                                                    statusBanner = "Global DPI scale set to ${preset.label}"
+                                                    wizardVm.statusBanner = "Global DPI scale set to ${preset.label}"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -975,8 +744,8 @@ fun SetupWizardFullScreen(
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = invertNavOrder,
-                                                    onCheckedChange = { invertNavOrder = it }
+                                                    checked = wizardVm.invertNavOrder,
+                                                    onCheckedChange = { wizardVm.invertNavOrder = it }
                                                 )
                                             }
                                         }
@@ -989,26 +758,26 @@ fun SetupWizardFullScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "Fine-Tune Global DPI Scale (${customDpiScalePct}%)",
+                                                text = "Fine-Tune Global DPI Scale (${wizardVm.customDpiScalePct}%)",
                                                 color = GhTextSecondary,
                                                 fontSize = 11.5.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                             TextButton(
                                                 onClick = {
-                                                    selectedDpiPreset = DpiScalePreset.DEFAULT
-                                                    customDpiScalePct = 100
-                                                    dashboardCardZoomScales = DashboardCardSlot.defaultZoomMap
+                                                    wizardVm.selectedDpiPreset = DpiScalePreset.DEFAULT
+                                                    wizardVm.customDpiScalePct = 100
+                                                    wizardVm.dashboardCardZoomScales = DashboardCardSlot.defaultZoomMap
                                                 }
                                             ) {
                                                 Text("Reset 100%", fontSize = 11.sp, color = GhAccentGreen)
                                             }
                                         }
                                         Slider(
-                                            value = customDpiScalePct.toFloat(),
+                                            value = wizardVm.customDpiScalePct.toFloat(),
                                             onValueChange = { v ->
-                                                selectedDpiPreset = DpiScalePreset.CUSTOM
-                                                customDpiScalePct = v.roundToInt().coerceIn(70, 150)
+                                                wizardVm.selectedDpiPreset = DpiScalePreset.CUSTOM
+                                                wizardVm.customDpiScalePct = v.roundToInt().coerceIn(70, 150)
                                             },
                                             valueRange = 70f..140f,
                                             modifier = Modifier.height(24.dp),
@@ -1043,11 +812,11 @@ fun SetupWizardFullScreen(
                                     )
 
                                     Surface(
-                                        color = if (keepScreenAwake) GhTileGreenActive else GhTileSurfaceElevated.copy(alpha = 0.55f),
+                                        color = if (wizardVm.keepScreenAwake) GhTileGreenActive else GhTileSurfaceElevated.copy(alpha = 0.55f),
                                         shape = RoundedCornerShape(14.dp),
                                         border = BorderStroke(
                                             1.dp,
-                                            if (keepScreenAwake) GhAccentGreen.copy(alpha = 0.5f) else GhCardBorder
+                                            if (wizardVm.keepScreenAwake) GhAccentGreen.copy(alpha = 0.5f) else GhCardBorder
                                         ),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
@@ -1065,7 +834,7 @@ fun SetupWizardFullScreen(
                                                 Icon(
                                                     imageVector = Icons.Outlined.LightMode,
                                                     contentDescription = null,
-                                                    tint = if (keepScreenAwake) GhAccentGreen else GhAccentWarm,
+                                                    tint = if (wizardVm.keepScreenAwake) GhAccentGreen else GhAccentWarm,
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(12.dp))
@@ -1077,7 +846,7 @@ fun SetupWizardFullScreen(
                                                         fontWeight = FontWeight.Bold
                                                     )
                                                     Text(
-                                                        text = if (keepScreenAwake) {
+                                                        text = if (wizardVm.keepScreenAwake) {
                                                             "Screen will stay awake continuously and never dim or sleep."
                                                         } else {
                                                             "Screen will automatically sleep after the Screen Timeout selected below."
@@ -1088,16 +857,16 @@ fun SetupWizardFullScreen(
                                                 }
                                             }
                                             SfHouseMintPillSwitch(
-                                                checked = keepScreenAwake,
+                                                checked = wizardVm.keepScreenAwake,
                                                 onCheckedChange = { awake ->
-                                                    keepScreenAwake = awake
-                                                    if (!awake && selectedSleepTimeoutSec == 0) {
-                                                        selectedSleepTimeoutSec = 90
+                                                    wizardVm.keepScreenAwake = awake
+                                                    if (!awake && wizardVm.selectedSleepTimeoutSec == 0) {
+                                                        wizardVm.selectedSleepTimeoutSec = 90
                                                     }
-                                                    statusBanner = if (awake) {
+                                                    wizardVm.statusBanner = if (awake) {
                                                         "Keep Screen Awake enabled (screen will stay on)."
                                                     } else {
-                                                        "Keep Screen Awake disabled (using ${selectedSleepTimeoutSec}s timeout)."
+                                                        "Keep Screen Awake disabled (using ${wizardVm.selectedSleepTimeoutSec}s timeout)."
                                                     }
                                                 }
                                             )
@@ -1109,17 +878,17 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Dashboard Theme (Light / Dark / Auto)",
-                                                selectedText = selectedThemeMode.label,
+                                                selectedText = wizardVm.selectedThemeMode.label,
                                                 options = AppThemeMode.entries,
                                                 optionLabel = { it.label },
                                                 onOptionSelected = { mode ->
-                                                    selectedThemeMode = mode
+                                                    wizardVm.selectedThemeMode = mode
                                                     DeviceRepository.applyThemeMode(
                                                         mode = mode,
-                                                        accentPreset = selectedAccentPreset,
-                                                        customAccentColorArgb = customAccentColorArgb
+                                                        accentPreset = wizardVm.selectedAccentPreset,
+                                                        customAccentColorArgb = wizardVm.customAccentColorArgb
                                                     )
-                                                    statusBanner = "Saved theme: ${mode.label}"
+                                                    wizardVm.statusBanner = "Saved theme: ${mode.label}"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -1128,18 +897,18 @@ fun SetupWizardFullScreen(
                                         secondContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Screen Timeout (Inactivity Sleep Timer)",
-                                                selectedText = if (keepScreenAwake) {
+                                                selectedText = if (wizardVm.keepScreenAwake) {
                                                     "Keep Screen Awake Active (Always On)"
                                                 } else {
-                                                    sleepOptions.firstOrNull { it.first == selectedSleepTimeoutSec }?.second
-                                                        ?: "${selectedSleepTimeoutSec} Seconds"
+                                                    sleepOptions.firstOrNull { it.first == wizardVm.selectedSleepTimeoutSec }?.second
+                                                        ?: "${wizardVm.selectedSleepTimeoutSec} Seconds"
                                                 },
                                                 options = sleepOptions,
                                                 optionLabel = { it.second },
                                                 onOptionSelected = { (sec, label) ->
-                                                    selectedSleepTimeoutSec = sec
-                                                    keepScreenAwake = (sec == 0)
-                                                    statusBanner = "Screen timeout set to $label"
+                                                    wizardVm.selectedSleepTimeoutSec = sec
+                                                    wizardVm.keepScreenAwake = (sec == 0)
+                                                    wizardVm.statusBanner = "Screen timeout set to $label"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -1152,13 +921,13 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Cloud Camera Quota Saver (Auto-Pause)",
-                                                selectedText = cloudAutoPauseOptions.firstOrNull { it.first == selectedCloudAutoPauseSec }?.second
+                                                selectedText = cloudAutoPauseOptions.firstOrNull { it.first == wizardVm.selectedCloudAutoPauseSec }?.second
                                                     ?: "2 Minutes (Recommended)",
                                                 options = cloudAutoPauseOptions,
                                                 optionLabel = { it.second },
                                                 onOptionSelected = { (sec, label) ->
-                                                    selectedCloudAutoPauseSec = sec
-                                                    statusBanner = "Cloud stream auto-pause set to $label"
+                                                    wizardVm.selectedCloudAutoPauseSec = sec
+                                                    wizardVm.statusBanner = "Cloud stream auto-pause set to $label"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -1167,12 +936,12 @@ fun SetupWizardFullScreen(
                                         secondContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Default Music Player Service",
-                                                selectedText = selectedMusicProvider.label,
+                                                selectedText = wizardVm.selectedMusicProvider.label,
                                                 options = MusicProvider.entries,
                                                 optionLabel = { it.label },
                                                 onOptionSelected = { provider ->
-                                                    selectedMusicProvider = provider
-                                                    statusBanner = "Default music service set to ${provider.label}"
+                                                    wizardVm.selectedMusicProvider = provider
+                                                    wizardVm.statusBanner = "Default music service set to ${provider.label}"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -1205,9 +974,9 @@ fun SetupWizardFullScreen(
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = showRoomLabelsOnTiles,
+                                                    checked = wizardVm.showRoomLabelsOnTiles,
                                                     onCheckedChange = { show ->
-                                                        showRoomLabelsOnTiles = show
+                                                        wizardVm.showRoomLabelsOnTiles = show
                                                     }
                                                 )
                                             }
@@ -1232,9 +1001,9 @@ fun SetupWizardFullScreen(
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = enablePresenceWake,
+                                                    checked = wizardVm.enablePresenceWake,
                                                     onCheckedChange = { enabled ->
-                                                        enablePresenceWake = enabled
+                                                        wizardVm.enablePresenceWake = enabled
                                                     }
                                                 )
                                             }
@@ -1281,14 +1050,10 @@ fun SetupWizardFullScreen(
                                                     val existingIdx = tiles.indexOfFirst { it.type == TileType.PHOTO_SLIDESHOW }
                                                     if (existingIdx in tiles.indices) {
                                                         tiles[existingIdx] = tiles[existingIdx].copy(
-                                                            isVisible = true,
-                                                            slideshowSourceType = slideshowSourceType,
-                                                            slideshowCloudUrl = slideshowCloudUrl,
-                                                            slideshowLocalUris = slideshowLocalUris.toList(),
-                                                            slideshowIntervalSeconds = slideshowIntervalSeconds
+                                                            isVisible = true
                                                         )
                                                         DeviceRepository.saveTiles(context, tiles)
-                                                        statusBanner = "SUCCESS: Updated 'Family Photos' slideshow configuration!"
+                                                        wizardVm.statusBanner = "SUCCESS: Updated 'Family Photos' slideshow configuration!"
                                                     } else {
                                                         scope.launch {
                                                             val slideshowIdentity = ResolvedDeviceIdentity(
@@ -1306,7 +1071,7 @@ fun SetupWizardFullScreen(
                                                                 context = context,
                                                                 identity = slideshowIdentity,
                                                                 tiles = tiles,
-                                                                bridgeSettings = currentTempBridge(),
+                                                                bridgeSettings = wizardVm.currentTempBridge(bridgeSettings),
                                                                 scope = scope
                                                             )
                                                             if (onboardRes.isSuccess) {
@@ -1316,16 +1081,12 @@ fun SetupWizardFullScreen(
                                                                     tiles[idx] = tiles[idx].copy(
                                                                         colSpan = 2,
                                                                         rowSpan = 2,
-                                                                        isTall = true,
-                                                                        slideshowSourceType = slideshowSourceType,
-                                                                        slideshowCloudUrl = slideshowCloudUrl,
-                                                                        slideshowLocalUris = slideshowLocalUris.toList(),
-                                                                        slideshowIntervalSeconds = slideshowIntervalSeconds
+                                                                        isTall = true
                                                                     )
                                                                     DeviceRepository.saveTiles(context, tiles)
                                                                 }
                                                             }
-                                                            statusBanner = "SUCCESS: Linked 'Family Photos' slideshow configuration!"
+                                                            wizardVm.statusBanner = "SUCCESS: Linked 'Family Photos' slideshow configuration!"
                                                         }
                                                     }
                                                 },
@@ -1365,9 +1126,9 @@ fun SetupWizardFullScreen(
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = enableSwipeableSlideshowPage,
+                                                    checked = wizardVm.enableSwipeableSlideshowPage,
                                                     onCheckedChange = { enabled ->
-                                                        enableSwipeableSlideshowPage = enabled
+                                                        wizardVm.enableSwipeableSlideshowPage = enabled
                                                     }
                                                 )
                                             }
@@ -1392,9 +1153,9 @@ fun SetupWizardFullScreen(
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = showClockOnSlideshowPage,
+                                                    checked = wizardVm.showClockOnSlideshowPage,
                                                     onCheckedChange = { show ->
-                                                        showClockOnSlideshowPage = show
+                                                        wizardVm.showClockOnSlideshowPage = show
                                                     }
                                                 )
                                             }
@@ -1408,12 +1169,12 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Default Slideshow Photo Source",
-                                                selectedText = slideshowSourceType.label,
-                                                options = SlideshowSourceType.entries.filter { it != SlideshowSourceType.CUSTOM_URLS || showAdvancedSlideshowLinkField },
+                                                selectedText = wizardVm.slideshowSourceType.label,
+                                                options = SlideshowSourceType.entries.filter { it != SlideshowSourceType.CUSTOM_URLS || wizardVm.showAdvancedSlideshowLinkField },
                                                 optionLabel = { it.label },
                                                 optionSubtitle = { it.subtitle },
                                                 onOptionSelected = { src ->
-                                                    slideshowSourceType = src
+                                                    wizardVm.slideshowSourceType = src
                                                     PhotoSlideshowResolver.clearCloudCache()
                                                 },
                                                 textStyle = compactInputTextStyle,
@@ -1423,12 +1184,12 @@ fun SetupWizardFullScreen(
                                         secondContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Slide Interval Speed",
-                                                selectedText = slideshowIntervalOptions.firstOrNull { it.first == slideshowIntervalSeconds }?.second
-                                                    ?: "Every ${slideshowIntervalSeconds}s",
+                                                selectedText = slideshowIntervalOptions.firstOrNull { it.first == wizardVm.slideshowIntervalSeconds }?.second
+                                                    ?: "Every ${wizardVm.slideshowIntervalSeconds}s",
                                                 options = slideshowIntervalOptions,
                                                 optionLabel = { it.second },
                                                 onOptionSelected = { (sec, _) ->
-                                                    slideshowIntervalSeconds = sec
+                                                    wizardVm.slideshowIntervalSeconds = sec
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -1436,13 +1197,13 @@ fun SetupWizardFullScreen(
                                         }
                                     )
 
-                                    when (slideshowSourceType) {
+                                    when (wizardVm.slideshowSourceType) {
                                         SlideshowSourceType.LOCAL_DEVICE -> {
                                             ResponsiveSplitRow(
                                                 isStacked = isCompactMobile,
                                                 firstContent = { mod ->
                                                     Text(
-                                                        text = "Selected Local Photos: ${slideshowLocalUris.size} photo(s)",
+                                                        text = "Selected Local Photos: ${wizardVm.slideshowLocalUris.size} photo(s)",
                                                         color = GhAccentGreen,
                                                         fontSize = 12.sp,
                                                         fontWeight = FontWeight.SemiBold,
@@ -1451,11 +1212,11 @@ fun SetupWizardFullScreen(
                                                 },
                                                 secondContent = {
                                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                        if (slideshowLocalUris.isNotEmpty()) {
+                                                        if (wizardVm.slideshowLocalUris.isNotEmpty()) {
                                                             OutlinedButton(
                                                                 onClick = {
-                                                                    slideshowLocalUris.clear()
-                                                                    statusBanner = "Cleared local slideshow photos."
+                                                                    wizardVm.slideshowLocalUris = emptyList()
+                                                                    wizardVm.statusBanner = "Cleared local slideshow photos."
                                                                 },
                                                                 shape = RoundedCornerShape(9.dp)
                                                             ) {
@@ -1482,15 +1243,15 @@ fun SetupWizardFullScreen(
                                         }
                                         SlideshowSourceType.GOOGLE_PHOTOS,
                                         SlideshowSourceType.ONEDRIVE -> {
-                                            val linkedCount = slideshowCloudUrl.split(",", "\n").count { it.trim().startsWith("http") }
+                                            val linkedCount = wizardVm.slideshowCloudUrl.split(",", "\n").count { it.trim().startsWith("http") }
                                             ResponsiveSplitRow(
                                                 isStacked = isCompactMobile,
                                                 firstContent = { mod ->
                                                     Text(
                                                         text = if (linkedCount > 0) {
-                                                            "${slideshowSourceType.label} Connected ($linkedCount photos/albums linked) \u2713"
+                                                            "${wizardVm.slideshowSourceType.label} Connected ($linkedCount photos/albums linked) \u2713"
                                                         } else {
-                                                            "Sign in to ${slideshowSourceType.label} to select the albums you want:"
+                                                            "Sign in to ${wizardVm.slideshowSourceType.label} to select the albums you want:"
                                                         },
                                                         color = if (linkedCount > 0) GhAccentGreen else GhTextPrimary,
                                                         fontSize = 12.sp,
@@ -1502,7 +1263,7 @@ fun SetupWizardFullScreen(
                                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                                         Button(
                                                             onClick = {
-                                                                activeCloudPhotoPickerProvider = slideshowSourceType
+                                                                wizardVm.activeCloudPhotoPickerProvider = wizardVm.slideshowSourceType
                                                             },
                                                             shape = RoundedCornerShape(9.dp),
                                                             colors = ButtonDefaults.buttonColors(
@@ -1513,7 +1274,7 @@ fun SetupWizardFullScreen(
                                                             Icon(Icons.Outlined.AccountCircle, contentDescription = null, modifier = Modifier.size(15.dp))
                                                             Spacer(modifier = Modifier.width(6.dp))
                                                             Text(
-                                                                text = if (slideshowSourceType == SlideshowSourceType.GOOGLE_PHOTOS)
+                                                                text = if (wizardVm.slideshowSourceType == SlideshowSourceType.GOOGLE_PHOTOS)
                                                                     "Sign In & Select Albums"
                                                                 else
                                                                     "Sign In & Select Folders",
@@ -1521,9 +1282,9 @@ fun SetupWizardFullScreen(
                                                                 fontWeight = FontWeight.Bold
                                                             )
                                                         }
-                                                        TextButton(onClick = { showAdvancedSlideshowLinkField = !showAdvancedSlideshowLinkField }) {
+                                                        TextButton(onClick = { wizardVm.showAdvancedSlideshowLinkField = !wizardVm.showAdvancedSlideshowLinkField }) {
                                                             Text(
-                                                                text = if (showAdvancedSlideshowLinkField) "Hide Link" else "Advanced Link",
+                                                                text = if (wizardVm.showAdvancedSlideshowLinkField) "Hide Link" else "Advanced Link",
                                                                 fontSize = 11.sp,
                                                                 color = GhTextSecondary
                                                             )
@@ -1531,16 +1292,16 @@ fun SetupWizardFullScreen(
                                                     }
                                                 }
                                             )
-                                            if (showAdvancedSlideshowLinkField) {
+                                            if (wizardVm.showAdvancedSlideshowLinkField) {
                                                 OutlinedTextField(
-                                                    value = slideshowCloudUrl,
+                                                    value = wizardVm.slideshowCloudUrl,
                                                     onValueChange = { url ->
-                                                        slideshowCloudUrl = url
+                                                        wizardVm.slideshowCloudUrl = url
                                                         PhotoSlideshowResolver.clearCloudCache()
                                                     },
                                                     label = {
                                                         Text(
-                                                            if (slideshowSourceType == SlideshowSourceType.GOOGLE_PHOTOS)
+                                                            if (wizardVm.slideshowSourceType == SlideshowSourceType.GOOGLE_PHOTOS)
                                                                 "Google Photos Shared Album Link"
                                                             else
                                                                 "OneDrive Shared Folder / Album Link",
@@ -1557,9 +1318,9 @@ fun SetupWizardFullScreen(
                                         }
                                         SlideshowSourceType.CUSTOM_URLS -> {
                                             OutlinedTextField(
-                                                value = slideshowCloudUrl,
+                                                value = wizardVm.slideshowCloudUrl,
                                                 onValueChange = { url ->
-                                                    slideshowCloudUrl = url
+                                                    wizardVm.slideshowCloudUrl = url
                                                     PhotoSlideshowResolver.clearCloudCache()
                                                 },
                                                 label = {
@@ -1617,11 +1378,11 @@ fun SetupWizardFullScreen(
                                                     onClick = {
                                                         GoogleCastLanClient.playDoorbellChimeOnNestMinis(
                                                             scope = scope,
-                                                            bridge = currentTempBridge(),
+                                                            bridge = wizardVm.currentTempBridge(bridgeSettings),
                                                             tiles = tiles,
-                                                            customAnnouncementText = doorbellChimeMessage
+                                                            customAnnouncementText = wizardVm.doorbellChimeMessage
                                                         )
-                                                        statusBanner = "Playing test doorbell chime on Nest Mini(s)..."
+                                                        wizardVm.statusBanner = "Playing test doorbell chime on Nest Mini(s)..."
                                                     },
                                                     shape = RoundedCornerShape(9.dp),
                                                     colors = ButtonDefaults.filledTonalButtonColors(
@@ -1634,9 +1395,9 @@ fun SetupWizardFullScreen(
                                                     Text("Test Chime", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = enableNestMiniDoorbellChime,
+                                                    checked = wizardVm.enableNestMiniDoorbellChime,
                                                     onCheckedChange = { enabled ->
-                                                        enableNestMiniDoorbellChime = enabled
+                                                        wizardVm.enableNestMiniDoorbellChime = enabled
                                                     }
                                                 )
                                             }
@@ -1661,14 +1422,14 @@ fun SetupWizardFullScreen(
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(
-                                                            text = if (customDoorbellMp3Uri.isNotBlank()) "Custom Doorbell MP3 Linked \u2713" else "Custom Doorbell MP3 (Optional)",
-                                                            color = if (customDoorbellMp3Uri.isNotBlank()) GhAccentGreen else GhTextPrimary,
+                                                            text = if (wizardVm.customDoorbellMp3Uri.isNotBlank()) "Custom Doorbell MP3 Linked \u2713" else "Custom Doorbell MP3 (Optional)",
+                                                            color = if (wizardVm.customDoorbellMp3Uri.isNotBlank()) GhAccentGreen else GhTextPrimary,
                                                             fontSize = 12.sp,
                                                             fontWeight = FontWeight.Bold
                                                         )
                                                         Text(
-                                                            text = if (customDoorbellMp3Uri.isNotBlank()) {
-                                                                Uri.parse(customDoorbellMp3Uri).lastPathSegment ?: "Selected MP3"
+                                                            text = if (wizardVm.customDoorbellMp3Uri.isNotBlank()) {
+                                                                Uri.parse(wizardVm.customDoorbellMp3Uri).lastPathSegment ?: "Selected MP3"
                                                             } else {
                                                                 "Uses built-in harmonic chime if unset"
                                                             },
@@ -1679,8 +1440,8 @@ fun SetupWizardFullScreen(
                                                         )
                                                     }
                                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        if (customDoorbellMp3Uri.isNotBlank()) {
-                                                            TextButton(onClick = { customDoorbellMp3Uri = "" }) {
+                                                        if (wizardVm.customDoorbellMp3Uri.isNotBlank()) {
+                                                            TextButton(onClick = { wizardVm.customDoorbellMp3Uri = "" }) {
                                                                 Text("Clear", fontSize = 10.5.sp, color = GhAccentRed)
                                                             }
                                                         }
@@ -1712,14 +1473,14 @@ fun SetupWizardFullScreen(
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(
-                                                            text = if (customAlarmMp3Uri.isNotBlank()) "Custom Security Alarm MP3 \u2713" else "Security Alarm MP3 (Optional)",
-                                                            color = if (customAlarmMp3Uri.isNotBlank()) GhAccentGreen else GhTextPrimary,
+                                                            text = if (wizardVm.customAlarmMp3Uri.isNotBlank()) "Custom Security Alarm MP3 \u2713" else "Security Alarm MP3 (Optional)",
+                                                            color = if (wizardVm.customAlarmMp3Uri.isNotBlank()) GhAccentGreen else GhTextPrimary,
                                                             fontSize = 12.sp,
                                                             fontWeight = FontWeight.Bold
                                                         )
                                                         Text(
-                                                            text = if (customAlarmMp3Uri.isNotBlank()) {
-                                                                Uri.parse(customAlarmMp3Uri).lastPathSegment ?: "Selected MP3"
+                                                            text = if (wizardVm.customAlarmMp3Uri.isNotBlank()) {
+                                                                Uri.parse(wizardVm.customAlarmMp3Uri).lastPathSegment ?: "Selected MP3"
                                                             } else {
                                                                 "Streamed to speakers on Away/Night alerts"
                                                             },
@@ -1730,8 +1491,8 @@ fun SetupWizardFullScreen(
                                                         )
                                                     }
                                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        if (customAlarmMp3Uri.isNotBlank()) {
-                                                            TextButton(onClick = { customAlarmMp3Uri = "" }) {
+                                                        if (wizardVm.customAlarmMp3Uri.isNotBlank()) {
+                                                            TextButton(onClick = { wizardVm.customAlarmMp3Uri = "" }) {
                                                                 Text("Clear", fontSize = 10.5.sp, color = GhAccentRed)
                                                             }
                                                         }
@@ -1755,9 +1516,9 @@ fun SetupWizardFullScreen(
                                         secondWeight = 0.8f,
                                         firstContent = { mod ->
                                             OutlinedTextField(
-                                                value = doorbellChimeMessage,
+                                                value = wizardVm.doorbellChimeMessage,
                                                 onValueChange = {
-                                                    doorbellChimeMessage = it
+                                                    wizardVm.doorbellChimeMessage = it
                                                 },
                                                 label = { Text("Spoken Doorbell Announcement on Nest Mini", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
@@ -1770,15 +1531,15 @@ fun SetupWizardFullScreen(
                                         secondContent = { mod ->
                                             Column(modifier = mod) {
                                                 Text(
-                                                    text = "Chime Volume: $nestMiniDoorbellVolume%",
+                                                    text = "Chime Volume: $wizardVm.nestMiniDoorbellVolume%",
                                                     color = GhAccentGreen,
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Slider(
-                                                    value = nestMiniDoorbellVolume.toFloat(),
+                                                    value = wizardVm.nestMiniDoorbellVolume.toFloat(),
                                                     onValueChange = { v ->
-                                                        nestMiniDoorbellVolume = v.roundToInt().coerceIn(20, 100)
+                                                        wizardVm.nestMiniDoorbellVolume = v.roundToInt().coerceIn(20, 100)
                                                     },
                                                     valueRange = 20f..100f,
                                                     modifier = Modifier.height(26.dp),
@@ -1800,13 +1561,13 @@ fun SetupWizardFullScreen(
                                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             items(discoveredCastDevices.filter { !it.isCastGroup }, key = { it.id }) { dev ->
                                                 val key = "${dev.ipAddress}:${dev.port}"
-                                                val isPicked = key in doorbellChimeTargetIps
+                                                val isPicked = key in wizardVm.doorbellChimeTargetIps
                                                 FilterChip(
                                                     selected = isPicked,
                                                     onClick = {
-                                                        val next = doorbellChimeTargetIps.toMutableSet()
+                                                        val next = wizardVm.doorbellChimeTargetIps.toMutableSet()
                                                         if (!next.add(key)) next.remove(key)
-                                                        doorbellChimeTargetIps = next
+                                                        wizardVm.doorbellChimeTargetIps = next
                                                     },
                                                     shape = RoundedCornerShape(50),
                                                     label = { Text(dev.name, fontSize = 11.sp) }
@@ -1842,7 +1603,7 @@ fun SetupWizardFullScreen(
                                                     fontFamily = GhFont
                                                 )
                                                 Text(
-                                                    text = "Say \"$voiceWakeWord, is my Jaguar locked?\", \"set Lytmi to HDMI 2\", or \"why did my routine fail?\".",
+                                                    text = "Say \"$wizardVm.voiceWakeWord, is my Jaguar locked?\", \"set Lytmi to HDMI 2\", or \"why did my routine fail?\".",
                                                     color = GhTextSecondary,
                                                     fontSize = 11.sp,
                                                     fontFamily = GhFont
@@ -1873,13 +1634,13 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Hands-Free Wake Word Phrase",
-                                                selectedText = wakeWordOptions.firstOrNull { it.first.equals(voiceWakeWord, true) }?.second
-                                                    ?: "\"$voiceWakeWord\"",
+                                                selectedText = wakeWordOptions.firstOrNull { it.first.equals(wizardVm.voiceWakeWord, true) }?.second
+                                                    ?: "\"$wizardVm.voiceWakeWord\"",
                                                 options = wakeWordOptions,
                                                 optionLabel = { it.second },
                                                 onOptionSelected = { (word, _) ->
-                                                    voiceWakeWord = word
-                                                    statusBanner = "Wake word set to \"$word\""
+                                                    wizardVm.voiceWakeWord = word
+                                                    wizardVm.statusBanner = "Wake word set to \"$word\""
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -1887,8 +1648,8 @@ fun SetupWizardFullScreen(
                                         },
                                         secondContent = { mod ->
                                             OutlinedTextField(
-                                                value = localLlmEndpointUrl,
-                                                onValueChange = { localLlmEndpointUrl = it },
+                                                value = wizardVm.localLlmEndpointUrl,
+                                                onValueChange = { wizardVm.localLlmEndpointUrl = it },
                                                 label = { Text("Optional Local LAN LLM URL (Ollama / OpenAI-Compatible)", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 shape = RoundedCornerShape(14.dp),
@@ -1918,17 +1679,17 @@ fun SetupWizardFullScreen(
                                                         fontWeight = FontWeight.SemiBold
                                                     )
                                                     Text(
-                                                        text = "Listen for \"$voiceWakeWord\" (ducks music automatically)",
+                                                        text = "Listen for \"$wizardVm.voiceWakeWord\" (ducks music automatically)",
                                                         color = GhTextSecondary,
                                                         fontSize = 11.sp
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = enableWakeWordListening,
+                                                    checked = wizardVm.enableWakeWordListening,
                                                     onCheckedChange = { enabled ->
-                                                        enableWakeWordListening = enabled
+                                                        wizardVm.enableWakeWordListening = enabled
                                                         if (enabled) {
-                                                            enableVoiceControl = true
+                                                            wizardVm.enableVoiceControl = true
                                                             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                                         }
                                                     }
@@ -1955,9 +1716,9 @@ fun SetupWizardFullScreen(
                                                     )
                                                 }
                                                 SfHouseMintPillSwitch(
-                                                    checked = enableVoiceAnnouncements,
+                                                    checked = wizardVm.enableVoiceAnnouncements,
                                                     onCheckedChange = { enabled ->
-                                                        enableVoiceAnnouncements = enabled
+                                                        wizardVm.enableVoiceAnnouncements = enabled
                                                     }
                                                 )
                                             }
@@ -2006,9 +1767,9 @@ fun SetupWizardFullScreen(
                                         }
                                         FilledTonalButton(
                                             onClick = {
-                                                DeviceRepository.saveBridge(context, currentTempBridge())
+                                                DeviceRepository.saveBridge(context, wizardVm.currentTempBridge(bridgeSettings))
                                                 ClaraApplication.ensureTuyaSdkInitialized(context, true)
-                                                statusBanner = if (ClaraApplication.isTuyaSdkReady(context)) {
+                                                wizardVm.statusBanner = if (ClaraApplication.isTuyaSdkReady(context)) {
                                                     "SUCCESS: Tuya Smart Home SDK initialized!"
                                                 } else {
                                                     "Saved keys — if SDK still reports uninitialized, attach ClaraApplication.kt to verify BuildConfig / t_s.bmp."
@@ -2027,8 +1788,8 @@ fun SetupWizardFullScreen(
                                         isStacked = isCompactMobile,
                                         firstContent = { mod ->
                                             OutlinedTextField(
-                                                value = tuyaAccessId,
-                                                onValueChange = { tuyaAccessId = it.trim() },
+                                                value = wizardVm.tuyaAccessId,
+                                                onValueChange = { wizardVm.tuyaAccessId = it.trim() },
                                                 label = { Text("Tuya AppKey / IoT Access ID", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 shape = RoundedCornerShape(14.dp),
@@ -2039,8 +1800,8 @@ fun SetupWizardFullScreen(
                                         },
                                         secondContent = { mod ->
                                             OutlinedTextField(
-                                                value = tuyaAccessSecret,
-                                                onValueChange = { tuyaAccessSecret = it.trim() },
+                                                value = wizardVm.tuyaAccessSecret,
+                                                onValueChange = { wizardVm.tuyaAccessSecret = it.trim() },
                                                 label = { Text("Tuya AppSecret / IoT Access Secret", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 visualTransformation = PasswordVisualTransformation(),
@@ -2052,8 +1813,8 @@ fun SetupWizardFullScreen(
                                         }
                                     )
                                     OutlinedTextField(
-                                        value = tuyaUid,
-                                        onValueChange = { tuyaUid = it.trim() },
+                                        value = wizardVm.tuyaUid,
+                                        onValueChange = { wizardVm.tuyaUid = it.trim() },
                                         label = { Text("Optional Tuya Cloud UID (Leave blank for silent local UID pairing)", fontSize = 11.sp) },
                                         textStyle = compactInputTextStyle,
                                         shape = RoundedCornerShape(14.dp),
@@ -2066,8 +1827,8 @@ fun SetupWizardFullScreen(
                                         isStacked = isCompactMobile,
                                         firstContent = { mod ->
                                             OutlinedTextField(
-                                                value = smartThingsToken,
-                                                onValueChange = { smartThingsToken = it },
+                                                value = wizardVm.smartThingsToken,
+                                                onValueChange = { wizardVm.smartThingsToken = it },
                                                 label = { Text("Samsung SmartThings Personal Access Token (PAT)", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 visualTransformation = PasswordVisualTransformation(),
@@ -2079,8 +1840,8 @@ fun SetupWizardFullScreen(
                                         },
                                         secondContent = { mod ->
                                             OutlinedTextField(
-                                                value = teslaWallConnectorIp,
-                                                onValueChange = { teslaWallConnectorIp = it },
+                                                value = wizardVm.teslaWallConnectorIp,
+                                                onValueChange = { wizardVm.teslaWallConnectorIp = it },
                                                 label = { Text("Tesla Gen 3 Wall Connector Local IP (/api/1/vitals)", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 shape = RoundedCornerShape(14.dp),
@@ -2094,8 +1855,8 @@ fun SetupWizardFullScreen(
                                         isStacked = isCompactMobile,
                                         firstContent = { mod ->
                                             OutlinedTextField(
-                                                value = haUrl,
-                                                onValueChange = { haUrl = it },
+                                                value = wizardVm.haUrl,
+                                                onValueChange = { wizardVm.haUrl = it },
                                                 label = { Text("Home Assistant URL (e.g. http://homeassistant.local:8123)", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 shape = RoundedCornerShape(14.dp),
@@ -2106,8 +1867,8 @@ fun SetupWizardFullScreen(
                                         },
                                         secondContent = { mod ->
                                             OutlinedTextField(
-                                                value = frigateHostUrl,
-                                                onValueChange = { frigateHostUrl = it },
+                                                value = wizardVm.frigateHostUrl,
+                                                onValueChange = { wizardVm.frigateHostUrl = it },
                                                 label = { Text("Frigate NVR Host URL (Optional Local AI Camera Bridge)", fontSize = 11.sp) },
                                                 textStyle = compactInputTextStyle,
                                                 shape = RoundedCornerShape(14.dp),
@@ -2124,12 +1885,12 @@ fun SetupWizardFullScreen(
                         // CARD 7: SMART ELECTRICITY TARIFF RATES & HOME PROFILE
                         item {
                             ElectricityTariffAndProfileCard(
-                                tariffDayRateText = tariffDayRateText,
-                                onTariffDayRateChange = { tariffDayRateText = it },
-                                tariffNightRateText = tariffNightRateText,
-                                onTariffNightRateChange = { tariffNightRateText = it },
-                                tariffStandingChargeText = tariffStandingChargeText,
-                                onTariffStandingChargeChange = { tariffStandingChargeText = it },
+                                tariffDayRateText = wizardVm.tariffDayRateText,
+                            onTariffDayRateChange = { wizardVm.tariffDayRateText = it },
+                            tariffNightRateText = wizardVm.tariffNightRateText,
+                            onTariffNightRateChange = { wizardVm.tariffNightRateText = it },
+                            tariffStandingChargeText = wizardVm.tariffStandingChargeText,
+                            onTariffStandingChargeChange = { wizardVm.tariffStandingChargeText = it },
                                 compactInputTextStyle = compactInputTextStyle
                             )
                         }
@@ -2167,13 +1928,13 @@ fun SetupWizardFullScreen(
                                         firstContent = { mod ->
                                             CleanDropdownSelector(
                                                 label = "Currency Symbol",
-                                                selectedText = currencyChoices.firstOrNull { it.first == currencySymbol }?.second
-                                                    ?: currencySymbol,
+                                                selectedText = currencyChoices.firstOrNull { it.first == wizardVm.currencySymbol }?.second
+                                                    ?: wizardVm.currencySymbol,
                                                 options = currencyChoices,
                                                 optionLabel = { it.second },
                                                 onOptionSelected = { (sym, _) ->
-                                                    currencySymbol = sym
-                                                    statusBanner = "Currency updated to $sym"
+                                                    wizardVm.currencySymbol = sym
+                                                    wizardVm.statusBanner = "Currency updated to $sym"
                                                 },
                                                 textStyle = compactInputTextStyle,
                                                 modifier = mod
@@ -2186,19 +1947,19 @@ fun SetupWizardFullScreen(
                                             ) {
                                                 CleanDropdownSelector(
                                                     label = "Off-Peak Start",
-                                                    selectedText = "%02d:00".format(Locale.US, offPeakStartHour),
+                                                    selectedText = "%02d:00".format(Locale.US, wizardVm.offPeakStartHour),
                                                     options = hourOptions,
                                                     optionLabel = { it.second },
-                                                    onOptionSelected = { (h, _) -> offPeakStartHour = h },
+                                                    onOptionSelected = { (h, _) -> wizardVm.offPeakStartHour = h },
                                                     textStyle = compactInputTextStyle,
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 CleanDropdownSelector(
                                                     label = "Off-Peak End",
-                                                    selectedText = "%02d:00".format(Locale.US, offPeakEndHour),
+                                                    selectedText = "%02d:00".format(Locale.US, wizardVm.offPeakEndHour),
                                                     options = hourOptions,
                                                     optionLabel = { it.second },
-                                                    onOptionSelected = { (h, _) -> offPeakEndHour = h },
+                                                    onOptionSelected = { (h, _) -> wizardVm.offPeakEndHour = h },
                                                     textStyle = compactInputTextStyle,
                                                     modifier = Modifier.weight(1f)
                                                 )
@@ -2221,9 +1982,9 @@ fun SetupWizardFullScreen(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 OutlinedTextField(
-                                                    value = securityHomeTempText,
-                                                    onValueChange = { securityHomeTempText = it },
-                                                    label = { Text("Home \u00B0C", fontSize = 11.sp) },
+                                                    value = wizardVm.securityHomeTempText,
+                                                    onValueChange = { wizardVm.securityHomeTempText = it },
+                                                    label = { androidx.compose.material3.Text("Home \u00B0C", fontSize = 11.sp) },
                                                     textStyle = compactInputTextStyle,
                                                     shape = RoundedCornerShape(14.dp),
                                                     colors = claraFieldColors(),
@@ -2231,9 +1992,9 @@ fun SetupWizardFullScreen(
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 OutlinedTextField(
-                                                    value = securityAwayTempText,
-                                                    onValueChange = { securityAwayTempText = it },
-                                                    label = { Text("Away \u00B0C", fontSize = 11.sp) },
+                                                    value = wizardVm.securityAwayTempText,
+                                                    onValueChange = { wizardVm.securityAwayTempText = it },
+                                                    label = { androidx.compose.material3.Text("Away \u00B0C", fontSize = 11.sp) },
                                                     textStyle = compactInputTextStyle,
                                                     shape = RoundedCornerShape(14.dp),
                                                     colors = claraFieldColors(),
@@ -2248,9 +2009,9 @@ fun SetupWizardFullScreen(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 OutlinedTextField(
-                                                    value = securityNightTempText,
-                                                    onValueChange = { securityNightTempText = it },
-                                                    label = { Text("Night \u00B0C", fontSize = 11.sp) },
+                                                    value = wizardVm.securityNightTempText,
+                                                    onValueChange = { wizardVm.securityNightTempText = it },
+                                                    label = { androidx.compose.material3.Text("Night \u00B0C", fontSize = 11.sp) },
                                                     textStyle = compactInputTextStyle,
                                                     shape = RoundedCornerShape(14.dp),
                                                     colors = claraFieldColors(),
@@ -2258,9 +2019,9 @@ fun SetupWizardFullScreen(
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 OutlinedTextField(
-                                                    value = securityVacationTempText,
-                                                    onValueChange = { securityVacationTempText = it },
-                                                    label = { Text("Vacation \u00B0C", fontSize = 11.sp) },
+                                                    value = wizardVm.securityVacationTempText,
+                                                    onValueChange = { wizardVm.securityVacationTempText = it },
+                                                    label = { androidx.compose.material3.Text("Vacation \u00B0C", fontSize = 11.sp) },
                                                     textStyle = compactInputTextStyle,
                                                     shape = RoundedCornerShape(14.dp),
                                                     colors = claraFieldColors(),
@@ -2284,16 +2045,16 @@ fun SetupWizardFullScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        items(customRoomsList.toList(), key = { it }) { roomName ->
+                                        items(wizardVm.customRoomsList.toList(), key = { it }) { roomName ->
                                             InputChip(
                                                 selected = true,
                                                 onClick = {
-                                                    if (customRoomsList.size > 1) {
-                                                        customRoomsList.remove(roomName)
+                                                    if (wizardVm.customRoomsList.size > 1) {
+                                                        wizardVm.customRoomsList = wizardVm.customRoomsList.filter { it != roomName }
                                                     }
                                                 },
                                                 shape = RoundedCornerShape(50),
-                                                label = { Text(roomName, fontSize = 11.sp) },
+                                                label = { androidx.compose.material3.Text(roomName, fontSize = 11.sp) },
                                                 trailingIcon = {
                                                     Icon(
                                                         imageVector = Icons.Default.Close,
@@ -2323,8 +2084,10 @@ fun SetupWizardFullScreen(
                                         Button(
                                             onClick = {
                                                 val clean = newRoomInput.trim()
-                                                if (clean.isNotBlank() && customRoomsList.none { it.equals(clean, ignoreCase = true) }) {
-                                                    customRoomsList.add(clean)
+                                                if (clean.isNotBlank() && wizardVm.customRoomsList.none { it.equals(clean, ignoreCase = true) }) {
+                                                    val updated = wizardVm.customRoomsList.toMutableList()
+                                                    updated.add(clean)
+                                                    wizardVm.customRoomsList = updated
                                                     newRoomInput = ""
                                                 }
                                             },
@@ -2348,15 +2111,15 @@ fun SetupWizardFullScreen(
                         item {
                             UserRolesAndPinSecurityCard(
                                 context = context,
-                                activeUserRole = activeUserRole,
-                                onActiveUserRoleChange = { activeUserRole = it },
-                                rolePinCode = rolePinCode,
-                                onRolePinCodeChange = { rolePinCode = it },
-                                requirePinForAdminAndVehicles = requirePinForAdminAndVehicles,
-                                onRequirePinChange = { requirePinForAdminAndVehicles = it },
+                                activeUserRole = wizardVm.activeUserRole,
+                                onActiveUserRoleChange = { wizardVm.activeUserRole = it },
+                                rolePinCode = wizardVm.rolePinCode,
+                                onRolePinCodeChange = { wizardVm.rolePinCode = it },
+                                requirePinForAdminAndVehicles = wizardVm.requirePinForAdminAndVehicles,
+                                onRequirePinChange = { wizardVm.requirePinForAdminAndVehicles = it },
                                 isCompactMobile = isCompactMobile,
                                 compactInputTextStyle = compactInputTextStyle,
-                                onStatusBanner = { statusBanner = it }
+                                onStatusBanner = { wizardVm.statusBanner = it }
                             )
                         }
 
@@ -2408,7 +2171,7 @@ fun SetupWizardFullScreen(
                                                 )
                                             }
                                             FilledTonalButton(
-                                                onClick = { activeSidebarSection = SettingsSidebarSection.HOME_HEALTH },
+                                                onClick = { wizardVm.activeSidebarSection = SettingsSidebarSection.HOME_HEALTH },
                                                 shape = RoundedCornerShape(9.dp),
                                                 colors = ButtonDefaults.filledTonalButtonColors(
                                                     containerColor = GhAccentGreen.copy(alpha = 0.22f),
@@ -2521,7 +2284,7 @@ fun SetupWizardFullScreen(
                                 tiles = tiles,
                                 automationRules = automationRules,
                                 compactInputTextStyle = compactInputTextStyle,
-                                onStatusBanner = { statusBanner = it }
+                                onStatusBanner = { wizardVm.statusBanner = it }
                             )
                         }
 
@@ -2626,7 +2389,7 @@ fun SetupWizardFullScreen(
                             HorizontalDivider(color = GhCardBorder)
 
                             SettingsSidebarSection.entries.forEach { section ->
-                                val isSelected = activeSidebarSection == section
+                                val isSelected = wizardVm.activeSidebarSection == section
                                 val sectionLabel = if (section == SettingsSidebarSection.CUSTOMISE_DASHBOARD && hiddenTilesCount > 0) {
                                     "${section.label} ($hiddenTilesCount hidden)"
                                 } else {
@@ -2638,7 +2401,7 @@ fun SetupWizardFullScreen(
                                     border = if (isSelected) BorderStroke(1.dp, GhAccentGreen.copy(alpha = 0.55f)) else null,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { activeSidebarSection = section }
+                                        .clickable { wizardVm.activeSidebarSection = section }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
@@ -2766,7 +2529,7 @@ fun SetupWizardFullScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             items(SettingsSidebarSection.entries) { section ->
-                                val isSelected = activeSidebarSection == section
+                                val isSelected = wizardVm.activeSidebarSection == section
                                 val sectionLabel = if (section == SettingsSidebarSection.CUSTOMISE_DASHBOARD && hiddenTilesCount > 0) {
                                     "${section.label} ($hiddenTilesCount hidden)"
                                 } else {
@@ -2781,7 +2544,7 @@ fun SetupWizardFullScreen(
                                 }
                                 FilterChip(
                                     selected = isSelected,
-                                    onClick = { activeSidebarSection = section },
+                                    onClick = { wizardVm.activeSidebarSection = section },
                                     shape = RoundedCornerShape(9.dp),
                                     leadingIcon = {
                                         Icon(
@@ -2813,20 +2576,20 @@ fun SetupWizardFullScreen(
             }
         }
 
-        activeCloudPhotoPickerProvider?.let { providerToPick ->
+        wizardVm.activeCloudPhotoPickerProvider?.let { providerToPick ->
             CloudPhotosAlbumPickerModal(
                 provider = providerToPick,
                 onPhotosExtracted = { extractedUrls ->
                     if (extractedUrls.isNotEmpty()) {
-                        slideshowCloudUrl = extractedUrls.joinToString(",")
+                        wizardVm.slideshowCloudUrl = extractedUrls.joinToString(",")
                         PhotoSlideshowResolver.clearCloudCache()
-                        val updated = currentTempBridge().copy(slideshowCloudUrl = slideshowCloudUrl)
+                        val updated = wizardVm.currentTempBridge(bridgeSettings).copy(slideshowCloudUrl = wizardVm.slideshowCloudUrl)
                         DeviceRepository.saveBridge(context, updated)
-                        statusBanner = "SUCCESS: Linked ${extractedUrls.size} photo(s) from ${providerToPick.label}!"
+                        wizardVm.statusBanner = "SUCCESS: Linked ${extractedUrls.size} photo(s) from ${providerToPick.label}!"
                     }
-                    activeCloudPhotoPickerProvider = null
+                    wizardVm.activeCloudPhotoPickerProvider = null
                 },
-                onDismiss = { activeCloudPhotoPickerProvider = null }
+                onDismiss = { wizardVm.activeCloudPhotoPickerProvider = null }
             )
         }
 
@@ -2837,7 +2600,7 @@ fun SetupWizardFullScreen(
                     showNestWebLoginModal = false
                     pendingNestEntryKeyForWebModal = ""
                     isSigningIntoNest = true
-                    statusBanner = "Google Nest connected! Importing your thermostats..."
+                    wizardVm.statusBanner = "Google Nest connected! Importing your thermostats..."
                     syncDiscoveredNestThermostatsToDashboard()
                 },
                 onDismiss = {

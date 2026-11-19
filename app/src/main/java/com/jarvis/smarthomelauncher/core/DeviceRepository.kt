@@ -3,6 +3,7 @@ package com.jarvis.smarthomelauncher.core
 import com.jarvis.smarthomelauncher.*
 import com.jarvis.smarthomelauncher.engines.*
 import com.jarvis.smarthomelauncher.integrations.*
+import com.jarvis.smarthomelauncher.db.toEntity
 import com.jarvis.smarthomelauncher.ui.modals.*
 import com.jarvis.smarthomelauncher.ui.popups.*
 import com.jarvis.smarthomelauncher.ui.screens.*
@@ -388,6 +389,24 @@ object DeviceRepository {
             saveTiles(context, updatedTiles)
         }
         return true
+    }
+
+    fun updateDeviceEndpointAndMac(
+        context: Context,
+        canonicalGuid: String,
+        newHostIp: String,
+        newPort: Int,
+        learnedMac: String
+    ) {
+        val appCtx = context.applicationContext
+        repoScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            ClaraDeviceRegistryStore.getInstance(appCtx).updateDeviceEndpointAndMac(
+                canonicalGuid = canonicalGuid,
+                newHostIp = newHostIp,
+                newPort = newPort,
+                learnedMac = learnedMac
+            )
+        }
     }
     private const val TAG = "ClaraDeviceRepo"
     private const val PREFS_NAME = "google_home_jarvis_prefs_v10"
@@ -3033,6 +3052,11 @@ object DeviceRepository {
             cachedTileJsonById.keys.retainAll(activeIds)
             ClaraDeviceRegistryStore.getInstance(appCtx)
                 .persistTileJsonObjectsTransactional(objectList, reason = "save_tiles")
+            runCatching {
+                val roomDb = com.jarvis.smarthomelauncher.db.ClaraRoomDatabase.getInstance(appCtx)
+                val entities = latestSnapshot.map { it.toEntity() }
+                roomDb.smartTileDao().insertOrUpdateTiles(entities)
+            }
         }
         scheduleAsyncGraphRebuild(context = appCtx, tiles = snapshotCopy)
     }
@@ -4237,66 +4261,11 @@ object DeviceRepository {
             cachedDvrSnapshots = trimmed
         }
         JarvisLiveBridge.dvrSnapshotsFlow.value = trimmed
-        val appCtx = context.applicationContext
-        repoScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val db = TelemetryDatabaseHelper.getInstance(appCtx).writableDatabase
-            db.beginTransaction()
-            try {
-                val cv = android.content.ContentValues().apply {
-                    put("id", snapshot.id)
-                    put("timestampEpochMs", snapshot.timestampEpochMs)
-                    put("cameraTileId", snapshot.cameraTileId)
-                    put("cameraTitle", snapshot.cameraTitle)
-                    put("roomName", snapshot.roomName)
-                    put("aiEventType", snapshot.aiEventType.name)
-                    put("localFilePathOrUri", snapshot.localFilePathOrUri)
-                    put("summaryText", snapshot.summaryText)
-                }
-                db.insert(TelemetryDatabaseHelper.TABLE_DVR_SNAPSHOT, null, cv)
-                db.execSQL(
-                    "DELETE FROM ${TelemetryDatabaseHelper.TABLE_DVR_SNAPSHOT} WHERE id NOT IN (SELECT id FROM ${TelemetryDatabaseHelper.TABLE_DVR_SNAPSHOT} ORDER BY timestampEpochMs DESC LIMIT 50)"
-                )
-                db.setTransactionSuccessful()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to insert dvr snapshot", e)
-            } finally {
-                db.endTransaction()
-            }
-        }
     }
 
     fun loadDvrSnapshots(context: Context): List<DvrEventSnapshot> {
         synchronized(dvrLock) {
-            cachedDvrSnapshots?.let {
-                JarvisLiveBridge.dvrSnapshotsFlow.value = it
-                return it
-            }
-            val db = TelemetryDatabaseHelper.getInstance(context.applicationContext).readableDatabase
-            val list = mutableListOf<DvrEventSnapshot>()
-            try {
-                db.rawQuery(
-                    "SELECT id, timestampEpochMs, cameraTileId, cameraTitle, roomName, aiEventType, localFilePathOrUri, summaryText FROM ${TelemetryDatabaseHelper.TABLE_DVR_SNAPSHOT} ORDER BY timestampEpochMs DESC LIMIT 50",
-                    null
-                ).use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val aiEventType = runCatching { CameraAiEventType.valueOf(cursor.getString(5)) }.getOrDefault(CameraAiEventType.PERSON)
-                        list.add(
-                            DvrEventSnapshot(
-                                id = cursor.getString(0),
-                                timestampEpochMs = cursor.getLong(1),
-                                cameraTileId = cursor.getString(2),
-                                cameraTitle = cursor.getString(3),
-                                roomName = cursor.getString(4),
-                                aiEventType = aiEventType,
-                                localFilePathOrUri = cursor.getString(6),
-                                summaryText = cursor.getString(7)
-                            )
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to load dvr snapshots", e)
-            }
+            val list = cachedDvrSnapshots ?: emptyList()
             cachedDvrSnapshots = list
             JarvisLiveBridge.dvrSnapshotsFlow.value = list
             return list
@@ -4306,14 +4275,6 @@ object DeviceRepository {
     fun clearDvrSnapshots(context: Context) {
         synchronized(dvrLock) {
             cachedDvrSnapshots = emptyList()
-        }
-        val appCtx = context.applicationContext
-        repoScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                TelemetryDatabaseHelper.getInstance(appCtx).writableDatabase.delete(TelemetryDatabaseHelper.TABLE_DVR_SNAPSHOT, null, null)
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to clear dvr snapshots", e)
-            }
         }
         JarvisLiveBridge.dvrSnapshotsFlow.value = emptyList()
     }
@@ -4989,66 +4950,12 @@ object DeviceRepository {
             trimmed = current.take(150)
             cachedHabitEvents = trimmed
         }
-        val appCtx = context.applicationContext
-        repoScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val db = TelemetryDatabaseHelper.getInstance(appCtx).writableDatabase
-            db.beginTransaction()
-            try {
-                val cv = android.content.ContentValues().apply {
-                    put("timestampEpochMs", event.timestampEpochMs)
-                    put("tileId", event.tileId)
-                    put("tileTitle", event.tileTitle)
-                    put("actionType", event.actionType.name)
-                    put("numericValue", event.numericValue)
-                    put("textValue", event.textValue)
-                    put("hourOfDay", event.hourOfDay)
-                    put("minuteOfHour", event.minuteOfHour)
-                    put("isoDayOfWeek", event.isoDayOfWeek)
-                }
-                db.insert(TelemetryDatabaseHelper.TABLE_HABIT_EVENT, null, cv)
-                db.execSQL(
-                    "DELETE FROM ${TelemetryDatabaseHelper.TABLE_HABIT_EVENT} WHERE id NOT IN (SELECT id FROM ${TelemetryDatabaseHelper.TABLE_HABIT_EVENT} ORDER BY timestampEpochMs DESC LIMIT 150)"
-                )
-                db.setTransactionSuccessful()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to insert habit event", e)
-            } finally {
-                db.endTransaction()
-            }
-        }
         return trimmed
     }
 
     fun loadHabitActuationEvents(context: Context): List<HabitActuationEvent> {
         synchronized(habitLock) {
-            cachedHabitEvents?.let { return it }
-            val db = TelemetryDatabaseHelper.getInstance(context.applicationContext).readableDatabase
-            val list = mutableListOf<HabitActuationEvent>()
-            try {
-                db.rawQuery(
-                    "SELECT timestampEpochMs, tileId, tileTitle, actionType, numericValue, textValue, hourOfDay, minuteOfHour, isoDayOfWeek FROM ${TelemetryDatabaseHelper.TABLE_HABIT_EVENT} ORDER BY timestampEpochMs DESC LIMIT 150",
-                    null
-                ).use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val actType = runCatching { AutomationActionType.valueOf(cursor.getString(3)) }.getOrDefault(AutomationActionType.TURN_ON)
-                        list.add(
-                            HabitActuationEvent(
-                                timestampEpochMs = cursor.getLong(0),
-                                tileId = cursor.getString(1),
-                                tileTitle = cursor.getString(2),
-                                actionType = actType,
-                                numericValue = cursor.getFloat(4),
-                                textValue = cursor.getString(5),
-                                hourOfDay = cursor.getInt(6),
-                                minuteOfHour = cursor.getInt(7),
-                                isoDayOfWeek = cursor.getInt(8)
-                            )
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to load habit events", e)
-            }
+            val list = cachedHabitEvents ?: emptyList()
             cachedHabitEvents = list
             return list
         }

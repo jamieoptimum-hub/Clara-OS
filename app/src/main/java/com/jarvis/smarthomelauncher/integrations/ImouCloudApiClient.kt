@@ -12,10 +12,12 @@ import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
+
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
@@ -170,28 +172,31 @@ object ImouCloudApiClient {
         }
     }
 
+    private val okHttpClient = NetworkModule.okHttpClient.newBuilder()
+        .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
     private fun postOpenApi(host: String, endpoint: String, body: JSONObject): JSONObject? {
         if (JarvisLiveBridge.isCircuitOpen("IMOU_CLOUD")) {
             throw CircuitBreakerOpenException("Cloud Degraded \u2014 Running Locally")
         }
         val cleanHost = host.trim().trimEnd('/')
-        val url = URL("$cleanHost/openapi/$endpoint")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 8000
-            readTimeout = 8000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-        }
-        OutputStreamWriter(conn.outputStream).use { writer ->
-            writer.write(body.toString())
-            writer.flush()
-        }
-        val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-        val responseText = stream?.bufferedReader()?.use { it.readText() }
-        conn.disconnect()
-        return if (!responseText.isNullOrBlank()) runCatching { JSONObject(responseText) }.getOrNull() else null
+        val requestBody = body.toString().toRequestBody("application/json".toMediaType())
+        
+        val request = okhttp3.Request.Builder()
+            .url("$cleanHost/openapi/$endpoint")
+            .post(requestBody)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .build()
+            
+        return runCatching {
+            okHttpClient.newCall(request).execute().use { response ->
+                val responseText = response.body?.string()
+                if (!responseText.isNullOrBlank()) JSONObject(responseText) else null
+            }
+        }.getOrNull()
     }
 
     private fun isTokenExpiredResponse(resp: JSONObject?): Boolean {

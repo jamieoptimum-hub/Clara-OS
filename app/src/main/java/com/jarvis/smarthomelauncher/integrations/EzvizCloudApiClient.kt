@@ -14,10 +14,11 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -510,16 +511,19 @@ object EzvizCloudApiClient {
         )
         for (urlStr in candidateUrls) {
             try {
-                val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 3500
-                    readTimeout = 3500
-                    setRequestProperty("sessionId", sessionId)
-                    setRequestProperty("clientType", "13")
-                }
-                if (conn.responseCode in 200..299) {
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    conn.disconnect()
+                val res = runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        NetworkModule.jsonService.get(
+                            urlStr,
+                            mapOf(
+                                "sessionId" to sessionId,
+                                "clientType" to "13"
+                            )
+                        )
+                    }
+                }.getOrNull()
+                val body = res?.string() ?: ""
+                if (res != null) {
                     val json = JSONObject(body)
                     val data = json.optJSONObject("data") ?: json
                     val pin = listOf(
@@ -534,8 +538,6 @@ object EzvizCloudApiClient {
                         .firstOrNull { it.length in 4..16 && !it.equals("null", ignoreCase = true) }
                         .orEmpty()
                     if (pin.isNotBlank()) return pin
-                } else {
-                    conn.disconnect()
                 }
             } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -637,26 +639,23 @@ object EzvizCloudApiClient {
                     val formBody = form.entries.joinToString("&") { (k, v) ->
                         "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
                     }
-                    val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        connectTimeout = 4500
-                        readTimeout = 4500
-                        doOutput = true
-                        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                        setRequestProperty("User-Agent", "okhttp/3.12.1")
-                        setRequestProperty("featureCode", featureCode)
-                        setRequestProperty("clientType", "3")
-                        setRequestProperty("osVersion", "12")
-                        setRequestProperty("clientVersion", "5.9.8.0215")
-                        setRequestProperty("appId", "ys7")
-                        setRequestProperty("lang", "en-GB")
+                    runCatching {
+                        kotlinx.coroutines.runBlocking {
+                            NetworkModule.jsonService.postJson(
+                                endpoint,
+                                formBody.toRequestBody("application/x-www-form-urlencoded".toMediaType()),
+                                mapOf(
+                                    "User-Agent" to "okhttp/3.12.1",
+                                    "featureCode" to featureCode,
+                                    "clientType" to "3",
+                                    "osVersion" to "12",
+                                    "clientVersion" to "5.9.8.0215",
+                                    "appId" to "ys7",
+                                    "lang" to "en-GB"
+                                )
+                            )
+                        }
                     }
-                    OutputStreamWriter(conn.outputStream).use {
-                        it.write(formBody)
-                        it.flush()
-                    }
-                    conn.responseCode
-                    conn.disconnect()
                 } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
     com.jarvis.smarthomelauncher.core.ErrorClassifier.recordHandledException(
@@ -692,33 +691,29 @@ object EzvizCloudApiClient {
         val formBody = form.entries.joinToString("&") { (k, v) ->
             "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
         }
-        val conn = (URL("${hostUrl.trimEnd('/')}/v3/users/login/v5").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 6000
-            readTimeout = 6000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-            setRequestProperty("User-Agent", "okhttp/3.12.1")
-            setRequestProperty("featureCode", featureCode)
-            setRequestProperty("clientType", "3")
-            setRequestProperty("osVersion", "12")
-            setRequestProperty("clientVersion", "5.9.8.0215")
-            setRequestProperty("netType", "WIFI")
-            setRequestProperty("customno", "1000001")
-            setRequestProperty("ssid", "")
-            setRequestProperty("clientNo", "google")
-            setRequestProperty("appId", "ys7")
-            setRequestProperty("language", "en_GB")
-            setRequestProperty("lang", "en_GB")
-        }
-        OutputStreamWriter(conn.outputStream).use {
-            it.write(formBody)
-            it.flush()
-        }
-        val code = conn.responseCode
-        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-            ?.bufferedReader()?.use { it.readText() } ?: ""
-        conn.disconnect()
+        val res = runCatching {
+            kotlinx.coroutines.runBlocking {
+                NetworkModule.jsonService.postJson(
+                    "${hostUrl.trimEnd('/')}/v3/users/login/v5",
+                    formBody.toRequestBody("application/x-www-form-urlencoded".toMediaType()),
+                    mapOf(
+                        "User-Agent" to "okhttp/3.12.1",
+                        "featureCode" to featureCode,
+                        "clientType" to "3",
+                        "osVersion" to "12",
+                        "clientVersion" to "5.9.8.0215",
+                        "netType" to "WIFI",
+                        "customno" to "1000001",
+                        "ssid" to "",
+                        "clientNo" to "google",
+                        "appId" to "ys7",
+                        "language" to "en_GB",
+                        "lang" to "en_GB"
+                    )
+                )
+            }
+        }.getOrNull()
+        val body = res?.string() ?: ""
         return if (body.isNotBlank()) runCatching { JSONObject(body) }.getOrNull() else null
     }
 
@@ -744,17 +739,18 @@ object EzvizCloudApiClient {
             loadPersistedConsumerSession(context)?.let { (savedSid, savedHost) ->
                 try {
                     val testUrl = "$savedHost/v3/userdevices/v1/resources/pagelist?groupId=-1&limit=5&offset=0&filter=STATUS"
-                    val testConn = (URL(testUrl).openConnection() as HttpURLConnection).apply {
-                        requestMethod = "GET"
-                        connectTimeout = 4000
-                        readTimeout = 4000
-                        setRequestProperty("User-Agent", "okhttp/3.12.1")
-                        setRequestProperty("sessionId", savedSid)
-                        setRequestProperty("featureCode", featureCode)
-                        setRequestProperty("clientType", "3")
-                    }
-                    val ok = testConn.responseCode in 200..299
-                    testConn.disconnect()
+                    val testRes = runCatching {
+                        NetworkModule.jsonService.get(
+                            testUrl,
+                            mapOf(
+                                "User-Agent" to "okhttp/3.12.1",
+                                "sessionId" to savedSid,
+                                "featureCode" to featureCode,
+                                "clientType" to "3"
+                            )
+                        )
+                    }.getOrNull()
+                    val ok = testRes != null
                     if (ok) {
                         cachedSessionId = savedSid
                         cachedConsumerRegionHost = savedHost
@@ -940,28 +936,28 @@ object EzvizCloudApiClient {
             val filter = "CLOUD,CONNECTION,SWITCH,STATUS,WIFI,P2P,CHANNEL,FEATURE,VIDEO_QUALITY,KMS"
             val pagelistUrl = "$cachedConsumerRegionHost/v3/userdevices/v1/resources/pagelist" +
                     "?groupId=-1&limit=30&offset=0&filter=${URLEncoder.encode(filter, "UTF-8")}"
-            val conn = (URL(pagelistUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 6000
-                readTimeout = 6000
-                setRequestProperty("User-Agent", "okhttp/3.12.1")
-                setRequestProperty("sessionId", sessionId)
-                setRequestProperty("featureCode", featureCode)
-                setRequestProperty("clientType", "3")
-                setRequestProperty("osVersion", "12")
-                setRequestProperty("clientVersion", "5.9.8.0215")
-                setRequestProperty("netType", "WIFI")
-                setRequestProperty("customno", "1000001")
-                setRequestProperty("clientNo", "google")
-                setRequestProperty("appId", "ys7")
-            }
+            val res = runCatching {
+                NetworkModule.jsonService.get(
+                    pagelistUrl,
+                    mapOf(
+                        "User-Agent" to "okhttp/3.12.1",
+                        "sessionId" to sessionId,
+                        "featureCode" to featureCode,
+                        "clientType" to "3",
+                        "osVersion" to "12",
+                        "clientVersion" to "5.9.8.0215",
+                        "netType" to "WIFI",
+                        "customno" to "1000001",
+                        "clientNo" to "google",
+                        "appId" to "ys7"
+                    )
+                )
+            }.getOrNull()
 
-            val code = conn.responseCode
-            val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use { it.readText() } ?: ""
-            conn.disconnect()
+            val body = res?.string() ?: ""
+            val code = if (res != null) 200 else 500
 
-            if (code !in 200..299 || body.isBlank()) {
+            if (res == null || body.isBlank()) {
                 DiscoveryFlightRecorder.record(
                     eventType = DiscoveryEventType.FAILED,
                     transportSource = "EZVIZ_CLOUD",
@@ -1121,21 +1117,19 @@ object EzvizCloudApiClient {
         )
         for (urlStr in candidateWakeUrls) {
             try {
-                val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 3500
-                    readTimeout = 3500
-                    doOutput = true
-                    setRequestProperty("sessionId", sessionId)
-                    setRequestProperty("clientType", "13")
-                }
-                OutputStreamWriter(conn.outputStream).use {
-                    it.write("")
-                    it.flush()
-                }
-                val code = conn.responseCode
-                conn.disconnect()
-                if (code in 200..299) break
+                val res = runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        NetworkModule.jsonService.postJson(
+                            urlStr,
+                            "".toRequestBody("application/x-www-form-urlencoded".toMediaType()),
+                            mapOf(
+                                "sessionId" to sessionId,
+                                "clientType" to "13"
+                            )
+                        )
+                    }
+                }.getOrNull()
+                if (res != null) break
             } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
     com.jarvis.smarthomelauncher.core.ErrorClassifier.recordHandledException(
@@ -1214,22 +1208,19 @@ object EzvizCloudApiClient {
                         val formBody = params.entries.joinToString("&") { (k, v) ->
                             "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
                         }
-                        val conn = (URL("${host.trimEnd('/')}$path").openConnection() as HttpURLConnection).apply {
-                            requestMethod = "POST"
-                            connectTimeout = 5000
-                            readTimeout = 5000
-                            doOutput = true
-                            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                            setRequestProperty("sessionId", sessionId)
-                            setRequestProperty("clientType", "13")
-                        }
-                        OutputStreamWriter(conn.outputStream).use {
-                            it.write(formBody)
-                            it.flush()
-                        }
-                        val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-                        val respText = stream?.bufferedReader()?.use { it.readText() } ?: ""
-                        conn.disconnect()
+                        val res = runCatching {
+                            kotlinx.coroutines.runBlocking {
+                                NetworkModule.jsonService.postJson(
+                                    "${host.trimEnd('/')}$path",
+                                    formBody.toRequestBody("application/x-www-form-urlencoded".toMediaType()),
+                                    mapOf(
+                                        "sessionId" to sessionId,
+                                        "clientType" to "13"
+                                    )
+                                )
+                            }
+                        }.getOrNull()
+                        val respText = res?.string() ?: ""
                         if (respText.isNotBlank()) {
                             val json = runCatching { JSONObject(respText) }.getOrNull() ?: continue
                             val url = extractLiveStreamUrlFromJson(json)
@@ -1263,16 +1254,13 @@ object EzvizCloudApiClient {
                         "&protocol=2&quality=${URLEncoder.encode(quality, "UTF-8")}&supportH265=0" +
                         (if (verificationCode.isNotBlank()) "&code=${URLEncoder.encode(verificationCode, "UTF-8")}" else "")
 
-                val conn = (URL(v3Url).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                    setRequestProperty("sessionId", sessionId)
-                    setRequestProperty("clientType", "13")
-                }
-                if (conn.responseCode in 200..299) {
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    conn.disconnect()
+                val res = runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        NetworkModule.jsonService.get(v3Url, mapOf("sessionId" to sessionId, "clientType" to "13"))
+                    }
+                }.getOrNull()
+                val body = res?.string() ?: ""
+                if (res != null) {
                     val json = runCatching { JSONObject(body) }.getOrNull()
                     if (json != null) {
                         val url = extractLiveStreamUrlFromJson(json)
@@ -1280,8 +1268,6 @@ object EzvizCloudApiClient {
                             return url
                         }
                     }
-                } else {
-                    conn.disconnect()
                 }
             } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1301,24 +1287,19 @@ object EzvizCloudApiClient {
         if (JarvisLiveBridge.isCircuitOpen("EZVIZ_CLOUD")) {
             throw CircuitBreakerOpenException("Cloud Degraded \u2014 Running Locally")
         }
-        val url = URL(urlStr)
         val formBody = params.entries.joinToString("&") { (k, v) ->
             "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
         }
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 6000
-            readTimeout = 6000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        }
-        OutputStreamWriter(conn.outputStream).use { writer ->
-            writer.write(formBody)
-            writer.flush()
-        }
-        val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-        val responseText = stream?.bufferedReader()?.use { it.readText() }
-        conn.disconnect()
+        val res = runCatching {
+            kotlinx.coroutines.runBlocking {
+                NetworkModule.jsonService.postJson(
+                    urlStr,
+                    formBody.toRequestBody("application/x-www-form-urlencoded".toMediaType()),
+                    emptyMap()
+                )
+            }
+        }.getOrNull()
+        val responseText = res?.string()
         return if (!responseText.isNullOrBlank()) runCatching { JSONObject(responseText) }.getOrNull() else null
     }
 

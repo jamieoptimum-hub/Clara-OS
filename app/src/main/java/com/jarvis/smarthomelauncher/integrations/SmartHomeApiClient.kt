@@ -76,7 +76,7 @@ data class PooledHttpResponse(
 
 object SharedHttpClient {
     val instance: okhttp3.OkHttpClient by lazy {
-        okhttp3.OkHttpClient.Builder()
+        com.jarvis.smarthomelauncher.core.NetworkModule.okHttpClient.newBuilder()
             .connectionPool(okhttp3.ConnectionPool(16, 5, java.util.concurrent.TimeUnit.MINUTES))
             .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)

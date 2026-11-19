@@ -100,7 +100,8 @@ fun LgTvRemoteModal(
         val cleanHost = resolvedHost.substringBefore(":").trim().ifBlank { activeIp }
         val cleanMac = CrossEcosystemIdentityCorrelator.normalizeMac(resolvedMac).ifBlank { tvMac }
         if (cleanHost.isNotBlank()) {
-            ClaraDeviceRegistryStore.getInstance(context).updateDeviceEndpointAndMac(
+            DeviceRepository.updateDeviceEndpointAndMac(
+                context = context,
                 canonicalGuid = tile.canonicalGuid.ifBlank { tile.resolvedCanonicalGuid() },
                 newHostIp = cleanHost,
                 newPort = 3001,

@@ -1089,7 +1089,6 @@ fun HomeHealthAndDiagnosticsSection(
 
     var isRunningSelfHealSweep by remember { mutableStateOf(false) }
     var showFlightRecorderModal by remember { mutableStateOf(false) }
-    var showTimelineReplayModal by remember { mutableStateOf(false) }
     var selectedBlackBoxGuid by remember { mutableStateOf<String?>(null) }
     var xrayPendingRemovalTile by remember { mutableStateOf<SmartTile?>(null) }
 
@@ -1208,25 +1207,6 @@ fun HomeHealthAndDiagnosticsSection(
                         },
                         secondContent = {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        selectedBlackBoxGuid = null
-                                        showTimelineReplayModal = true
-                                    },
-                                    shape = RoundedCornerShape(50),
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = Color(0xFF34D399).copy(alpha = 0.18f),
-                                        contentColor = Color(0xFF34D399)
-                                    )
-                                ) {
-                                    Icon(Icons.Outlined.History, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Timeline Replay",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                                 FilledTonalButton(
                                     onClick = {
                                         selectedBlackBoxGuid = null
@@ -1900,21 +1880,6 @@ fun HomeHealthAndDiagnosticsSection(
                                     FilledTonalButton(
                                         onClick = {
                                             selectedBlackBoxGuid = devTile.canonicalGuid.ifBlank { devTile.resolvedCanonicalGuid() }
-                                            showTimelineReplayModal = true
-                                        },
-                                        shape = RoundedCornerShape(50),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = Color(0xFF34D399).copy(alpha = 0.18f),
-                                            contentColor = Color(0xFF34D399)
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(26.dp)
-                                    ) {
-                                        Text("Replay", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    FilledTonalButton(
-                                        onClick = {
-                                            selectedBlackBoxGuid = devTile.canonicalGuid.ifBlank { devTile.resolvedCanonicalGuid() }
                                             showFlightRecorderModal = true
                                         },
                                         shape = RoundedCornerShape(50),
@@ -2246,13 +2211,6 @@ fun HomeHealthAndDiagnosticsSection(
         FlightRecorderHubModal(
             initialDeviceIdFilter = selectedBlackBoxGuid,
             onDismiss = { showFlightRecorderModal = false }
-        )
-    }
-
-    if (showTimelineReplayModal) {
-        DeterministicTimelineReplayModal(
-            initialDeviceGuid = selectedBlackBoxGuid,
-            onDismiss = { showTimelineReplayModal = false }
         )
     }
 

@@ -51,9 +51,12 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
+import com.jarvis.smarthomelauncher.core.NetworkModule
 import java.net.URL
 import java.net.URLEncoder
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.runBlocking
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
@@ -81,7 +84,7 @@ object NestSdmApiClient {
         "https://home.nest.com"
 
     private val nestHttpClient: okhttp3.OkHttpClient by lazy {
-        okhttp3.OkHttpClient.Builder()
+        com.jarvis.smarthomelauncher.core.NetworkModule.okHttpClient.newBuilder()
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
@@ -462,35 +465,21 @@ object NestSdmApiClient {
         // 1. Try direct /session renewal with persisted/live home.nest.com cookies and current token
         if (liveNestCookies.isNotBlank() || cachedWebAccessToken.isNotBlank()) {
             try {
-                val conn = (URL("https://home.nest.com/session").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                    if (liveNestCookies.isNotBlank()) {
-                        setRequestProperty("Cookie", liveNestCookies)
-                    }
-                    if (cachedWebAccessToken.isNotBlank()) {
-                        val authHdr = if (cachedWebAccessToken.startsWith("Basic ", true) ||
-                            cachedWebAccessToken.startsWith("Bearer ", true)
-                        ) cachedWebAccessToken else "Basic $cachedWebAccessToken"
-                        setRequestProperty("Authorization", authHdr)
-                    }
-                    setRequestProperty("User-Agent", DESKTOP_UA)
-                    setRequestProperty("Accept", "application/json")
+                val headers = mutableMapOf<String, String>()
+                if (liveNestCookies.isNotBlank()) {
+                    headers["Cookie"] = liveNestCookies
                 }
-                if (conn.responseCode in 200..299) {
-                    val setCookies = conn.headerFields["Set-Cookie"].orEmpty()
-                    if (setCookies.isNotEmpty()) {
-                        runCatching {
-                            val cm = CookieManager.getInstance()
-                            setCookies.forEach { cookieHdr ->
-                                if (cookieHdr.isNotBlank()) cm.setCookie("https://home.nest.com", cookieHdr)
-                            }
-                            cm.flush()
-                        }
-                    }
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    conn.disconnect()
+                if (cachedWebAccessToken.isNotBlank()) {
+                    val authHdr = if (cachedWebAccessToken.startsWith("Basic ", true) ||
+                        cachedWebAccessToken.startsWith("Bearer ", true)
+                    ) cachedWebAccessToken else "Basic $cachedWebAccessToken"
+                    headers["Authorization"] = authHdr
+                }
+                headers["User-Agent"] = DESKTOP_UA
+                headers["Accept"] = "application/json"
+                val res = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.get("https://home.nest.com/session", headers) } }.getOrNull()
+                val body = res?.string() ?: ""
+                if (res != null) {
                     val json = JSONObject(body)
                     val tok = json.optString("access_token", "").trim()
                     val uid = json.optString("userid", cachedWebUserId).trim()
@@ -514,8 +503,6 @@ object NestSdmApiClient {
                         }
                         return true
                     }
-                } else {
-                    conn.disconnect()
                 }
             } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -533,19 +520,16 @@ object NestSdmApiClient {
         val provisionedApiKey = getProvisionedNestApiKey(context)
         if (issueUrl.startsWith("https://accounts.google.com") && cookies.isNotBlank() && provisionedApiKey.isNotBlank()) {
             try {
-                val conn1 = (URL(issueUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                    setRequestProperty("Sec-Fetch-Mode", "cors")
-                    setRequestProperty("User-Agent", DESKTOP_UA)
-                    setRequestProperty("X-Requested-With", "XmlHttpRequest")
-                    setRequestProperty("Referer", "https://accounts.google.com/o/oauth2/iframe")
-                    setRequestProperty("Cookie", cookies)
-                }
-                if (conn1.responseCode in 200..299) {
-                    val body1 = conn1.inputStream.bufferedReader().use { it.readText() }
-                    conn1.disconnect()
+                val headers1 = mapOf(
+                    "Sec-Fetch-Mode" to "cors",
+                    "User-Agent" to DESKTOP_UA,
+                    "X-Requested-With" to "XmlHttpRequest",
+                    "Referer" to "https://accounts.google.com/o/oauth2/iframe",
+                    "Cookie" to cookies
+                )
+                val res1 = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.get(issueUrl, headers1) } }.getOrNull()
+                val body1 = res1?.string() ?: ""
+                if (res1 != null) {
                     val cleanBody1 = body1.substringAfter("{", "").let { if (it.isNotBlank()) "{$it" else body1 }
                     val googleOauthToken = JSONObject(cleanBody1).optString("access_token", "").trim()
                     if (googleOauthToken.isNotBlank()) {
@@ -555,33 +539,25 @@ object NestSdmApiClient {
                             put("google_oauth_access_token", googleOauthToken)
                             put("policy_id", "authproxy-oauth-policy")
                         }.toString()
-                        val conn2 = (URL("https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt").openConnection() as HttpURLConnection).apply {
-                            requestMethod = "POST"
-                            connectTimeout = 5000
-                            readTimeout = 5000
-                            doOutput = true
-                            setRequestProperty("Authorization", "Bearer $googleOauthToken")
-                            setRequestProperty("Content-Type", "application/json")
-                            setRequestProperty("x-goog-api-key", provisionedApiKey)
-                            setRequestProperty("User-Agent", DESKTOP_UA)
-                        }
-                        OutputStreamWriter(conn2.outputStream).use { it.write(jwtPayload); it.flush() }
-                        if (conn2.responseCode in 200..299) {
-                            val body2 = conn2.inputStream.bufferedReader().use { it.readText() }
-                            conn2.disconnect()
+                        val headers2 = mapOf(
+                            "Authorization" to "Bearer $googleOauthToken",
+                            "x-goog-api-key" to provisionedApiKey,
+                            "User-Agent" to DESKTOP_UA
+                        )
+                        val reqBody2 = jwtPayload.toRequestBody("application/json".toMediaType())
+                        val res2 = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.postJson("https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt", reqBody2, headers2) } }.getOrNull()
+                        val body2 = res2?.string() ?: ""
+                        if (res2 != null) {
                             val nestJwt = JSONObject(body2).optString("jwt", "").trim()
                             if (nestJwt.isNotBlank()) {
-                                val conn3 = (URL("https://home.nest.com/session").openConnection() as HttpURLConnection).apply {
-                                    requestMethod = "GET"
-                                    connectTimeout = 5000
-                                    readTimeout = 5000
-                                    setRequestProperty("Authorization", "Basic $nestJwt")
-                                    setRequestProperty("User-Agent", DESKTOP_UA)
-                                    setRequestProperty("Accept", "application/json")
-                                }
-                                if (conn3.responseCode in 200..299) {
-                                    val body3 = conn3.inputStream.bufferedReader().use { it.readText() }
-                                    conn3.disconnect()
+                                val headers3 = mapOf(
+                                    "Authorization" to "Basic $nestJwt",
+                                    "User-Agent" to DESKTOP_UA,
+                                    "Accept" to "application/json"
+                                )
+                                val res3 = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.get("https://home.nest.com/session", headers3) } }.getOrNull()
+                                val body3 = res3?.string() ?: ""
+                                if (res3 != null) {
                                     val sessionJson = JSONObject(body3)
                                     val finalTok = sessionJson.optString("access_token", nestJwt).trim()
                                     val finalUid = sessionJson.optString("userid", cachedWebUserId).trim()
@@ -596,16 +572,10 @@ object NestSdmApiClient {
                                         }
                                         return true
                                     }
-                                } else {
-                                    conn3.disconnect()
                                 }
                             }
-                        } else {
-                            conn2.disconnect()
                         }
                     }
-                } else {
-                    conn1.disconnect()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Nest web session auto-refresh note: ${e.message}")
@@ -653,21 +623,16 @@ object NestSdmApiClient {
                     put("passphrase", cleanKey)
                     put("user_id", cachedWebUserId)
                 }.toString()
-                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 5500
-                    readTimeout = 5500
-                    doOutput = true
-                    setRequestProperty("Authorization", "Basic $cachedWebAccessToken")
-                    setRequestProperty("X-nl-user-id", cachedWebUserId)
-                    setRequestProperty("X-nl-protocol-version", "1")
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("User-Agent", DESKTOP_UA)
-                    setRequestProperty("Accept", "application/json")
-                }
-                OutputStreamWriter(conn.outputStream).use { it.write(payload); it.flush() }
-                val code = conn.responseCode
-                conn.disconnect()
+                val headers = mapOf(
+                    "Authorization" to "Basic $cachedWebAccessToken",
+                    "X-nl-user-id" to cachedWebUserId,
+                    "X-nl-protocol-version" to "1",
+                    "User-Agent" to DESKTOP_UA,
+                    "Accept" to "application/json"
+                )
+                val reqBody = payload.toRequestBody("application/json".toMediaType())
+                val res = runCatching { NetworkModule.jsonService.postJson(endpoint, reqBody, headers) }.getOrNull()
+                val code = if (res != null) 200 else 500
                 if (code in 200..299) {
                     claimAccepted = true
                     break
@@ -807,22 +772,17 @@ object NestSdmApiClient {
                 put("known_bucket_types", JSONArray().put("buckets").put("structure").put("shared").put("device").put("track").put("where"))
                 put("known_bucket_versions", JSONArray())
             }.toString()
-            val conn = (URL("https://home.nest.com/api/0.1/user/$cachedWebUserId/app_launch").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 4500
-                readTimeout = 4500
-                doOutput = true
-                setRequestProperty("Authorization", authHdr)
-                setRequestProperty("X-nl-user-id", cachedWebUserId)
-                setRequestProperty("X-nl-protocol-version", "1")
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("User-Agent", DESKTOP_UA)
-                setRequestProperty("Accept", "application/json")
-            }
-            OutputStreamWriter(conn.outputStream).use { it.write(appLaunchPayload); it.flush() }
-            if (conn.responseCode in 200..299) {
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                conn.disconnect()
+                val headers = mapOf(
+                    "Authorization" to authHdr,
+                    "X-nl-user-id" to cachedWebUserId,
+                    "X-nl-protocol-version" to "1",
+                    "User-Agent" to DESKTOP_UA,
+                    "Accept" to "application/json"
+                )
+                val reqBody = appLaunchPayload.toRequestBody("application/json".toMediaType())
+                val res = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.postJson("https://home.nest.com/api/0.1/user/$cachedWebUserId/app_launch", reqBody, headers) } }.getOrNull()
+                val body = res?.string() ?: ""
+                if (res != null) {
                 val root = JSONObject(body)
                 val resolvedTransport = root.optJSONObject("service_urls")
                     ?.optJSONObject("urls")
@@ -836,8 +796,6 @@ object NestSdmApiClient {
                         saveWebCapturedNestSession(ctx, cachedWebAccessToken, cachedWebUserId, resolvedTransport)
                     }
                 }
-            } else {
-                conn.disconnect()
             }
         } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -872,54 +830,53 @@ object NestSdmApiClient {
                 val authHdr = if (cachedWebAccessToken.startsWith("Basic ", true) ||
                     cachedWebAccessToken.startsWith("Bearer ", true)
                 ) cachedWebAccessToken else "Basic $cachedWebAccessToken"
-                val conn = (URL(targetUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = if (isCzfeReady) "GET" else "POST"
-                    connectTimeout = 4500
-                    readTimeout = 4500
-                    setRequestProperty("Authorization", authHdr)
-                    setRequestProperty("X-nl-user-id", cachedWebUserId)
-                    setRequestProperty("X-nl-protocol-version", "1")
-                    setRequestProperty("User-Agent", DESKTOP_UA)
-                    setRequestProperty("Accept", "application/json")
-                    if (!isCzfeReady) {
-                        doOutput = true
-                        setRequestProperty("Content-Type", "application/json")
+                val headers = mutableMapOf(
+                    "Authorization" to authHdr,
+                    "X-nl-user-id" to cachedWebUserId,
+                    "X-nl-protocol-version" to "1",
+                    "User-Agent" to DESKTOP_UA,
+                    "Accept" to "application/json"
+                )
+
+                val res = runCatching {
+                    if (isCzfeReady) {
+                        kotlinx.coroutines.runBlocking { NetworkModule.jsonService.get(targetUrl, headers) }
+                    } else {
+                        val launchBody = JSONObject().apply {
+                            put("known_bucket_types", JSONArray().put("buckets").put("structure").put("shared").put("device").put("track").put("where"))
+                            put("known_bucket_versions", JSONArray())
+                        }.toString()
+                        headers["Content-Type"] = "application/json"
+                        val reqBody = launchBody.toRequestBody("application/json".toMediaType())
+                        kotlinx.coroutines.runBlocking { NetworkModule.jsonService.postJson(targetUrl, reqBody, headers) }
                     }
-                }
-                if (!isCzfeReady) {
-                    val launchBody = JSONObject().apply {
-                        put("known_bucket_types", JSONArray().put("buckets").put("structure").put("shared").put("device").put("track").put("where"))
-                        put("known_bucket_versions", JSONArray())
-                    }.toString()
-                    OutputStreamWriter(conn.outputStream).use { it.write(launchBody); it.flush() }
-                }
-                val code = conn.responseCode
-                if (code == 401 && attempt == 0) {
-                    conn.disconnect()
+                }.getOrNull()
+
+                val code = if (res != null) 200 else 500
+                val body = res?.string() ?: ""
+
+                if (res == null && attempt == 0) {
                     if (refreshWebSessionTokenSync()) continue else {
                         DiscoveryFlightRecorder.record(
                             eventType = DiscoveryEventType.FAILED,
                             transportSource = "NEST_WEB_SESSION",
                             vendor = "Google Nest Web",
                             qualificationStage = "discoverNestDevicesViaWebSession",
-                            outcomeReason = "Nest web session returned HTTP 401 and token refresh failed"
+                            outcomeReason = "Nest web session returned HTTP 401/error and token refresh failed"
                         )
                         break
                     }
                 }
-                if (code !in 200..299) {
-                    conn.disconnect()
+                if (res == null) {
                     DiscoveryFlightRecorder.record(
                         eventType = DiscoveryEventType.FAILED,
                         transportSource = "NEST_WEB_SESSION",
                         vendor = "Google Nest Web",
                         qualificationStage = "discoverNestDevicesViaWebSession",
-                        outcomeReason = "Nest web transport returned HTTP $code"
+                        outcomeReason = "Nest web transport returned HTTP error"
                     )
                     break
                 }
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                conn.disconnect()
                 val root = JSONObject(body)
 
                 root.optJSONObject("service_urls")?.optJSONObject("urls")?.optString("transport_url", "")
@@ -1130,27 +1087,18 @@ object NestSdmApiClient {
                 } else {
                     "Basic $cachedWebAccessToken"
                 }
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 4500
-                    readTimeout = 4500
-                    doOutput = true
-                    setRequestProperty("Authorization", authHeader)
-                    setRequestProperty("X-nl-user-id", cachedWebUserId)
-                    setRequestProperty("X-nl-protocol-version", "1")
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("User-Agent", DESKTOP_UA)
-                }
-                OutputStreamWriter(conn.outputStream).use {
-                    it.write(payload.toString())
-                    it.flush()
-                }
-                val code = conn.responseCode
-                conn.disconnect()
-                if (code == 401 && attempt == 0) {
-                    if (refreshWebSessionTokenSync()) continue else return false
-                }
-                if (code in 200..299) {
+                val headers = mapOf(
+                "Authorization" to authHeader,
+                "X-nl-user-id" to cachedWebUserId,
+                "X-nl-protocol-version" to "1",
+                "User-Agent" to DESKTOP_UA
+            )
+            val reqBody = payload.toString().toRequestBody("application/json".toMediaType())
+            val res = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.postJson(url.toString(), reqBody, headers) } }.getOrNull()
+            if (res == null && attempt == 0) {
+                if (refreshWebSessionTokenSync()) continue else return false
+            }
+            if (res != null) {
                     return true
                 }
             } catch (e: Throwable) {
@@ -1203,21 +1151,10 @@ object NestSdmApiClient {
             val formBody = formParams.joinToString("&") { (k, v) ->
                 "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
             }
-            val conn = (URL("https://www.googleapis.com/oauth2/v4/token").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 6000
-                readTimeout = 6000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-            }
-            OutputStreamWriter(conn.outputStream).use { writer ->
-                writer.write(formBody)
-                writer.flush()
-            }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val respText = stream?.bufferedReader()?.use { it.readText() } ?: ""
-            conn.disconnect()
+val reqBody = formBody.toRequestBody("application/x-www-form-urlencoded".toMediaType())
+            val res = runCatching { NetworkModule.jsonService.postJson("https://www.googleapis.com/oauth2/v4/token", reqBody, emptyMap()) }.getOrNull()
+            val code = if (res != null) 200 else 500
+            val respText = res?.string() ?: ""
 
             if (code in 200..299 && respText.isNotBlank()) {
                 val json = JSONObject(respText)
@@ -1372,17 +1309,10 @@ object NestSdmApiClient {
 
             try {
                 val url = URL("https://smartdevicemanagement.googleapis.com/v1/enterprises/$projectId/devices")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 6000
-                    readTimeout = 6000
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("Content-Type", "application/json")
-                }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
-                conn.disconnect()
+    val headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json")
+            val res = runCatching { NetworkModule.jsonService.get(url.toString(), headers) }.getOrNull()
+            val code = if (res != null) 200 else 500
+            val body = res?.string() ?: ""
 
                 if (code == 429) {
                     rateLimitCooldownUntilMs = System.currentTimeMillis() + 60_000L
@@ -1690,22 +1620,11 @@ object NestSdmApiClient {
                 put("command", command)
                 put("params", params)
             }
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 5000
-                readTimeout = 5000
-                doOutput = true
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("Content-Type", "application/json")
-            }
-            OutputStreamWriter(conn.outputStream).use { writer ->
-                writer.write(payload.toString())
-                writer.flush()
-            }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            stream?.bufferedReader()?.use { it.readText() }
-            conn.disconnect()
+val headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json")
+            val reqBody = payload.toString().toRequestBody("application/json".toMediaType())
+            val res = runCatching { NetworkModule.jsonService.postJson(url.toString(), reqBody, headers) }.getOrNull()
+            val code = if (res != null) 200 else 500
+            res?.string()
             val succeeded = code in 200..299
             val latency = (System.currentTimeMillis() - startMs).coerceAtLeast(12L)
             JarvisLiveBridge.recordCommandLatency(
@@ -1959,24 +1878,13 @@ object NestSdmApiClient {
                 put("returnImmediately", true)
                 put("maxMessages", 10)
             }
-            val conn = (pullUrl.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 5000
-                readTimeout = 5000
-                doOutput = true
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("Content-Type", "application/json")
-            }
-            OutputStreamWriter(conn.outputStream).use { writer ->
-                writer.write(pullPayload.toString())
-                writer.flush()
-            }
-            if (conn.responseCode !in 200..299) {
-                conn.disconnect()
+            val headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json")
+            val reqBody = pullPayload.toString().toRequestBody("application/json".toMediaType())
+            val res = runCatching { NetworkModule.jsonService.postJson(pullUrl.toString(), reqBody, headers) }.getOrNull()
+            if (res == null) {
                 return@withContext
             }
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            conn.disconnect()
+            val body = res.string()
 
             val json = JSONObject(body)
             val messages = json.optJSONArray("receivedMessages") ?: return@withContext
@@ -2053,20 +1961,9 @@ object NestSdmApiClient {
 
             if (ackIds.length() > 0) {
                 val ackUrl = URL("https://pubsub.googleapis.com/v1/$sub:acknowledge")
-                val ackConn = (ackUrl.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 4000
-                    readTimeout = 4000
-                    doOutput = true
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("Content-Type", "application/json")
-                }
-                OutputStreamWriter(ackConn.outputStream).use { writer ->
-                    writer.write(JSONObject().put("ackIds", ackIds).toString())
-                    writer.flush()
-                }
-                ackConn.responseCode
-                ackConn.disconnect()
+                val headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json")
+            val reqBody = JSONObject().put("ackIds", ackIds).toString().toRequestBody("application/json".toMediaType())
+            runCatching { NetworkModule.jsonService.postJson(ackUrl.toString(), reqBody, headers) }
             }
         } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -2111,22 +2008,11 @@ object NestSdmApiClient {
                 put("command", "sdm.devices.commands.CameraLiveStream.GenerateRtspStream")
                 put("params", JSONObject())
             }
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 6000
-                readTimeout = 6000
-                doOutput = true
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("Content-Type", "application/json")
-            }
-            OutputStreamWriter(conn.outputStream).use { writer ->
-                writer.write(payload.toString())
-                writer.flush()
-            }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val respText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            conn.disconnect()
+            val headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json")
+            val reqBody = payload.toString().toRequestBody("application/json".toMediaType())
+            val res = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.postJson(url.toString(), reqBody, headers) } }.getOrNull()
+            val code = if (res != null) 200 else 500
+            val respText = res?.string() ?: "" 
 
             if (code in 200..299 && respText.isNotBlank()) {
                 val resultsObj = JSONObject(respText).optJSONObject("results")
@@ -2208,22 +2094,16 @@ private suspend fun exchangeGoogleCookiesForNestSession(
 
     for (issueUrl in candidateUrls) {
         try {
-            val conn1 = (URL(issueUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 5000
-                setRequestProperty("Sec-Fetch-Mode", "cors")
-                setRequestProperty("User-Agent", ua)
-                setRequestProperty("X-Requested-With", "XmlHttpRequest")
-                setRequestProperty("Referer", "https://accounts.google.com/o/oauth2/iframe")
-                setRequestProperty("Cookie", googleCookies)
-            }
-            if (conn1.responseCode !in 200..299) {
-                conn1.disconnect()
-                continue
-            }
-            val rawBody1 = conn1.inputStream.bufferedReader().use { it.readText() }
-            conn1.disconnect()
+            val headers1 = mapOf(
+                "Sec-Fetch-Mode" to "cors",
+                "User-Agent" to ua,
+                "X-Requested-With" to "XmlHttpRequest",
+                "Referer" to "https://accounts.google.com/o/oauth2/iframe",
+                "Cookie" to googleCookies
+            )
+            val res1 = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.get(issueUrl, headers1) } }.getOrNull()
+            if (res1 == null) continue
+            val rawBody1 = res1.string()
             val cleanBody1 = rawBody1.substringAfter("{", "").let { if (it.isNotBlank()) "{$it" else rawBody1 }
             val json1 = runCatching { JSONObject(cleanBody1) }.getOrNull() ?: continue
             val googleOauthToken = json1.optString("access_token", "").trim()
@@ -2238,37 +2118,26 @@ private suspend fun exchangeGoogleCookiesForNestSession(
 
             val provisionedApiKey = NestSdmApiClient.getProvisionedNestApiKey(context)
             if (provisionedApiKey.isBlank()) continue
-            val conn2 = (URL("https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 5000
-                readTimeout = 5000
-                doOutput = true
-                setRequestProperty("Authorization", "Bearer $googleOauthToken")
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("x-goog-api-key", provisionedApiKey)
-                setRequestProperty("User-Agent", ua)
-            }
-            OutputStreamWriter(conn2.outputStream).use { it.write(jwtPayload); it.flush() }
-            if (conn2.responseCode !in 200..299) {
-                conn2.disconnect()
-                continue
-            }
-            val body2 = conn2.inputStream.bufferedReader().use { it.readText() }
-            conn2.disconnect()
+            val headers2 = mapOf(
+                "Authorization" to "Bearer $googleOauthToken",
+                "x-goog-api-key" to provisionedApiKey,
+                "User-Agent" to ua
+            )
+            val reqBody2 = jwtPayload.toRequestBody("application/json".toMediaType())
+            val res2 = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.postJson("https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt", reqBody2, headers2) } }.getOrNull()
+            if (res2 == null) continue
+            val body2 = res2.string()
             val nestJwt = JSONObject(body2).optString("jwt", "").trim()
             if (nestJwt.isBlank()) continue
 
-            val conn3 = (URL("https://home.nest.com/session").openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 5000
-                setRequestProperty("Authorization", "Basic $nestJwt")
-                setRequestProperty("User-Agent", ua)
-                setRequestProperty("Accept", "application/json")
-            }
-            if (conn3.responseCode in 200..299) {
-                val body3 = conn3.inputStream.bufferedReader().use { it.readText() }
-                conn3.disconnect()
+            val headers3 = mapOf(
+                "Authorization" to "Basic $nestJwt",
+                "User-Agent" to ua,
+                "Accept" to "application/json"
+            )
+            val res3 = runCatching { kotlinx.coroutines.runBlocking { NetworkModule.jsonService.get("https://home.nest.com/session", headers3) } }.getOrNull()
+            val body3 = res3?.string() ?: ""
+            if (res3 != null) {
                 val sessionJson = JSONObject(body3)
                 val finalTok = sessionJson.optString("access_token", nestJwt).trim()
                 val finalUid = sessionJson.optString("userid", "").trim()
@@ -2287,8 +2156,6 @@ private suspend fun exchangeGoogleCookiesForNestSession(
                     )
                     return@withContext true
                 }
-            } else {
-                conn3.disconnect()
             }
         } catch (e: Throwable) {
     if (e is kotlinx.coroutines.CancellationException) throw e

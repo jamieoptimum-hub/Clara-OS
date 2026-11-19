@@ -35,7 +35,6 @@ import com.jarvis.smarthomelauncher.widgets.radio.Models.RadioUiState
 import com.jarvis.smarthomelauncher.widgets.radio.Models.RadioUserSettings
 import com.jarvis.smarthomelauncher.widgets.radio.Models.StationSortOption
 import com.jarvis.smarthomelauncher.widgets.radio.Services.LiveRadioService
-import com.jarvis.smarthomelauncher.widgets.radio.Services.RadioDataProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -147,7 +146,7 @@ internal class RadioDatabaseHelper(context: Context) :
 
 class RadioRepository private constructor(
     context: Context,
-    private val provider: RadioDataProvider = LiveRadioService()
+    private val provider: LiveRadioService = LiveRadioService()
 ) {
     private val appContext = context.applicationContext
     private val dbHelper = RadioDatabaseHelper(appContext)

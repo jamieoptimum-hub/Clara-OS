@@ -22,9 +22,7 @@ class TelemetryDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATA
         const val TABLE_TELEMETRY = "telemetry_points"
         const val TABLE_SECURITY_AUDIT = "security_audit_logs"
         const val TABLE_SELF_HEALING = "self_healing_logs"
-        const val TABLE_DVR_SNAPSHOT = "dvr_snapshots"
         const val TABLE_AUTOMATION_LOG = "automation_logs"
-        const val TABLE_HABIT_EVENT = "habit_events"
 
         @Volatile
         private var instance: TelemetryDatabaseHelper? = null
@@ -46,9 +44,7 @@ class TelemetryDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATA
         createTelemetryTable(db)
         createSecurityAuditTable(db)
         createSelfHealingTable(db)
-        createDvrSnapshotTable(db)
         createAutomationLogTable(db)
-        createHabitEventTable(db)
     }
 
     private fun createDiscoveryTable(db: SQLiteDatabase) {
@@ -259,15 +255,11 @@ class TelemetryDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATA
             db.execSQL("DROP TABLE IF EXISTS $TABLE_TELEMETRY")
             db.execSQL("DROP TABLE IF EXISTS $TABLE_SECURITY_AUDIT")
             db.execSQL("DROP TABLE IF EXISTS $TABLE_SELF_HEALING")
-            db.execSQL("DROP TABLE IF EXISTS $TABLE_DVR_SNAPSHOT")
             db.execSQL("DROP TABLE IF EXISTS $TABLE_AUTOMATION_LOG")
-            db.execSQL("DROP TABLE IF EXISTS $TABLE_HABIT_EVENT")
             createTelemetryTable(db)
             createSecurityAuditTable(db)
             createSelfHealingTable(db)
-            createDvrSnapshotTable(db)
             createAutomationLogTable(db)
-            createHabitEventTable(db)
         }
         if (oldVersion < 9) {
             runCatching {
@@ -333,24 +325,6 @@ class TelemetryDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATA
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_healing_time ON $TABLE_SELF_HEALING(timestampEpochMs DESC)")
     }
 
-    private fun createDvrSnapshotTable(db: SQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_DVR_SNAPSHOT (
-                id TEXT PRIMARY KEY NOT NULL,
-                timestampEpochMs INTEGER NOT NULL,
-                cameraTileId TEXT NOT NULL,
-                cameraTitle TEXT NOT NULL,
-                roomName TEXT NOT NULL,
-                aiEventType TEXT NOT NULL,
-                localFilePathOrUri TEXT NOT NULL,
-                summaryText TEXT NOT NULL
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dvr_time ON $TABLE_DVR_SNAPSHOT(timestampEpochMs DESC)")
-    }
-
     private fun createAutomationLogTable(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -368,25 +342,5 @@ class TelemetryDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATA
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_auto_log_time ON $TABLE_AUTOMATION_LOG(timestampEpochMs DESC)")
-    }
-
-    private fun createHabitEventTable(db: SQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_HABIT_EVENT (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestampEpochMs INTEGER NOT NULL,
-                tileId TEXT NOT NULL,
-                tileTitle TEXT NOT NULL,
-                actionType TEXT NOT NULL,
-                numericValue REAL NOT NULL,
-                textValue TEXT NOT NULL,
-                hourOfDay INTEGER NOT NULL,
-                minuteOfHour INTEGER NOT NULL,
-                isoDayOfWeek INTEGER NOT NULL
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_habit_time ON $TABLE_HABIT_EVENT(timestampEpochMs DESC)")
     }
 }

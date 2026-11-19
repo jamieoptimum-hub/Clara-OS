@@ -83,6 +83,27 @@ private object EntertainmentArtworkCache {
     private val cache = object : LruCache<String, ImageBitmap>(96) {}
     fun get(url: String): ImageBitmap? = synchronized(cache) { cache.get(url) }
     fun put(url: String, bmp: ImageBitmap) = synchronized(cache) { cache.put(url, bmp) }
+
+    suspend fun fetchBitmap(imageUrl: String): ImageBitmap? = withContext(Dispatchers.IO) {
+        if (imageUrl.isBlank()) return@withContext null
+        get(imageUrl)?.let { return@withContext it }
+        val loaded = runCatching {
+            val conn = (URL(imageUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+                instanceFollowRedirects = true
+            }
+            if (conn.responseCode in 200..299) {
+                conn.inputStream.use { stream ->
+                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                }
+            } else null
+        }.getOrNull()
+        if (loaded != null) {
+            put(imageUrl, loaded)
+        }
+        loaded
+    }
 }
 
 @Composable
@@ -99,24 +120,7 @@ private fun EntertainmentArtworkBox(
 
     LaunchedEffect(imageUrl) {
         if (imageUrl.isBlank() || bitmap != null) return@LaunchedEffect
-        val loaded = withContext(Dispatchers.IO) {
-            runCatching {
-                val conn = (URL(imageUrl).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 6000
-                    readTimeout = 6000
-                    instanceFollowRedirects = true
-                }
-                if (conn.responseCode in 200..299) {
-                    conn.inputStream.use { stream ->
-                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                    }
-                } else null
-            }.getOrNull()
-        }
-        if (loaded != null) {
-            EntertainmentArtworkCache.put(imageUrl, loaded)
-            bitmap = loaded
-        }
+        bitmap = EntertainmentArtworkCache.fetchBitmap(imageUrl)
     }
 
     Box(

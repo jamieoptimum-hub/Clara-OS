@@ -368,6 +368,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        wakeScreenUp()
         hideSystemBars()
         if (NativeMusicCatalogClient.isSpotifySignedIn(this)) {
             SpotifyHiddenWebPlayer.installChromiumAudioFocusShield(this)
@@ -377,7 +378,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideSystemBars()
+        if (hasFocus) {
+            wakeScreenUp()
+            hideSystemBars()
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -452,6 +456,7 @@ fun GoogleHomeLauncherScreen(
     var bridgeSettings by viewModel::bridgeSettings
     val tiles = viewModel.tiles
     val automationRules = viewModel.automationRules
+    val uiState by viewModel.uiState.collectAsState()
 
     // Unified Grid Cards State (Clock/Hero, Weather, Volume + any extra user-added cards)
     val unifiedCards = remember {
@@ -544,7 +549,7 @@ fun GoogleHomeLauncherScreen(
         commitUnifiedCardAndTileCollisions(
             context = context,
             cards = unifiedCards,
-            tiles = tiles,
+            tiles = tiles.toMutableList(),
             gridColumns = currentUnifiedGridColumns
         )
         saveUnifiedDashboardCards(context, unifiedCards)
@@ -559,8 +564,7 @@ fun GoogleHomeLauncherScreen(
             dashboardCardZoomScales = cardZoomScales.toMap(),
             dashboardSlotWidgetTypes = slotWidgetTypes.toMap()
         )
-        bridgeSettings = updated
-        DeviceRepository.saveBridge(context, updated)
+        viewModel.updateBridgeSettings(context, updated)
     }
 
     fun applyLayoutSnapshot(snapshot: LauncherLayoutSnapshot) {
@@ -581,21 +585,23 @@ fun GoogleHomeLauncherScreen(
         slotWidgetTypes.putAll(snapshot.slotWidgetTypes)
 
         val tileSnapById = snapshot.tileCoordinates.associateBy { it.tileId }
-        for (i in tiles.indices) {
-            val t = tiles[i]
-            val snap = tileSnapById[t.id] ?: continue
-            tiles[i] = t.copy(
-                colSpan = snap.colSpan,
-                rowSpan = snap.rowSpan,
-                gridCol = snap.gridCol,
-                gridRow = snap.gridRow,
-                isTall = snap.isTall,
-                isVisible = snap.isVisible,
-                groupCardId = snap.groupCardId
-            )
+        val updatedTiles = tiles.map { t ->
+            val snap = tileSnapById[t.id]
+            if (snap != null) {
+                t.copy(
+                    colSpan = snap.colSpan,
+                    rowSpan = snap.rowSpan,
+                    gridCol = snap.gridCol,
+                    gridRow = snap.gridRow,
+                    isTall = snap.isTall,
+                    isVisible = snap.isVisible,
+                    groupCardId = snap.groupCardId
+                )
+            } else {
+                t
+            }
         }
-        persistDashboardCardLayout()
-        DeviceRepository.saveTiles(context, tiles)
+        viewModel.saveTiles(context, updatedTiles)
     }
 
     var selectedCardIdForMove by remember { mutableStateOf<String?>(null) }
@@ -612,7 +618,7 @@ fun GoogleHomeLauncherScreen(
     }
 
     var activeNavDestination by remember { mutableStateOf(DashboardNavDestination.HOME) }
-    var selectedRoomFilter by remember { mutableStateOf("All Rooms") }
+    val selectedRoomFilter = uiState.selectedRoomFilter
     var showAddRoomDialog by remember { mutableStateOf(false) }
     var newRoomNameDraft by remember { mutableStateOf("") }
     var pendingTileIdForNewRoom by remember { mutableStateOf<String?>(null) }
@@ -629,13 +635,13 @@ fun GoogleHomeLauncherScreen(
     var wizardInitialSection by remember { mutableStateOf(SettingsSidebarSection.DEVICE_CONFIG) }
     var lastWizardDismissTimeMs by remember { mutableLongStateOf(0L) }
 
-    var isEditMode by remember { mutableStateOf(false) }
+    val isEditMode = uiState.isEditMode
     var selectedTileIdForMove by remember { mutableStateOf<String?>(null) }
 
     // Automatically exit Edit Mode if the active user switches to a Parental-Locked profile
     LaunchedEffect(bridgeSettings.activeUserProfileId, bridgeSettings.isParentalLockActive) {
         if (bridgeSettings.isParentalLockActive && isEditMode) {
-            isEditMode = false
+            viewModel.setEditMode(false)
             selectedTileIdForMove = null
             selectedCardIdForMove = null
         }
@@ -711,13 +717,11 @@ fun GoogleHomeLauncherScreen(
                 }
                 if (ruleIdx in automationRules.indices) {
                     val rule = automationRules[ruleIdx]
-                    val tileIdx = tiles.indexOfFirst { it.id == targetTile.id }
-                    if (tileIdx in tiles.indices) {
-                        tiles[tileIdx] = tiles[tileIdx].copy(isActive = true)
-                    }
+                    val updatedTiles = tiles.map { if (it.id == targetTile.id) it.copy(isActive = true) else it }
+                    viewModel.saveTiles(context, updatedTiles)
                     AutomationEngine.executeRuleActions(
                         rule = rule,
-                        tiles = tiles,
+                        tiles = updatedTiles.toMutableList(),
                         bridge = bridgeSettings,
                         audioManager = audioManager,
                         scope = scope,
@@ -725,15 +729,15 @@ fun GoogleHomeLauncherScreen(
                         onSpeak = onSpeak,
                         triggerSource = "Dashboard Macro Tile"
                     )
-                    automationRules[ruleIdx] = rule.copy(lastTriggeredEpochMs = System.currentTimeMillis())
-                    DeviceRepository.saveAutomations(context, automationRules)
+                    val updatedRules = automationRules.mapIndexed { idx, r ->
+                        if (idx == ruleIdx) r.copy(lastTriggeredEpochMs = System.currentTimeMillis()) else r
+                    }
+                    viewModel.saveAutomations(context, updatedRules)
                     onSpeak("Running ${rule.name}")
                     scope.launch {
                         delay(1500L)
-                        val idxAfter = tiles.indexOfFirst { it.id == targetTile.id }
-                        if (idxAfter in tiles.indices) {
-                            tiles[idxAfter] = tiles[idxAfter].copy(isActive = false)
-                        }
+                        val resetTiles = tiles.map { if (it.id == targetTile.id) it.copy(isActive = false) else it }
+                        viewModel.saveTiles(context, resetTiles)
                     }
                 } else {
                     onSpeak("Macro ${targetTile.title} not found.")
@@ -747,15 +751,16 @@ fun GoogleHomeLauncherScreen(
                     val modes = SecurityCenterMode.entries
                     val nextIdx = (modes.indexOf(bridgeSettings.securityCenterMode) + 1) % modes.size
                     val nextMode = modes[nextIdx]
-                    bridgeSettings = AutomationEngine.applySecurityCenterMode(
+                    val updatedBridge = AutomationEngine.applySecurityCenterMode(
                         mode = nextMode,
                         context = context,
-                        tiles = tiles,
+                        tiles = tiles.toMutableList(),
                         bridge = bridgeSettings,
                         audioManager = audioManager,
                         scope = scope,
                         onSpeak = onSpeak
                     )
+                    viewModel.updateBridgeSettings(context, updatedBridge)
                 }
             }
             targetTile.type == TileType.CLOCK_WEATHER -> {
@@ -837,8 +842,8 @@ fun GoogleHomeLauncherScreen(
                     AutomationEngine.processSpokenVoiceCommand(
                         rawSpokenText = spokenCmd,
                         context = context,
-                        rules = automationRules,
-                        tiles = tiles,
+                        rules = automationRules.toMutableList(),
+                        tiles = tiles.toMutableList(),
                         bridge = bridgeSettings,
                         audioManager = audioManager,
                         scope = scope,
@@ -888,7 +893,7 @@ fun GoogleHomeLauncherScreen(
                         onSpeak("Layout customization enabled.")
                         selectedCardIdForMove = null
                         selectedTileIdForMove = null
-                        isEditMode = true
+                        viewModel.setEditMode(true)
                     }
                 } else {
                     AutomationEngine.processSpokenVoiceCommand(
@@ -1167,7 +1172,7 @@ fun GoogleHomeLauncherScreen(
                         }
                     }
                 }
-                DeviceRepository.saveTiles(context, tiles)
+                viewModel.saveTiles(context, tiles)
 
                 if (tileToPersist.type == TileType.MUSIC_PLAYER) {
                     ClaraInAppMusicPlayer.setVolumePercent(tileToPersist.volume)
@@ -1203,7 +1208,7 @@ fun GoogleHomeLauncherScreen(
                                     }
                                 )
                             }
-                            DeviceRepository.saveTiles(context, tiles)
+                            viewModel.saveTiles(context, tiles)
                         }
                     }
 
@@ -1317,10 +1322,10 @@ fun GoogleHomeLauncherScreen(
                 activeNavDestination = DashboardNavDestination.HOME
                 selectedCardIdForMove = null
                 selectedTileIdForMove = null
-                isEditMode = true
+                viewModel.setEditMode(true)
             }
         } else {
-            isEditMode = false
+            viewModel.setEditMode(false)
             selectedTileIdForMove = null
             draggedTileId = null
             dragOffset = Offset.Zero
@@ -1760,7 +1765,7 @@ fun GoogleHomeLauncherScreen(
 
                                     Button(
                                         onClick = {
-                                            isEditMode = false
+                                            viewModel.setEditMode(false)
                                             selectedTileIdForMove = null
                                             draggedTileId = null
                                             dragOffset = Offset.Zero
@@ -1813,7 +1818,7 @@ fun GoogleHomeLauncherScreen(
                                             selectedRoom = selectedRoomFilter,
                                             availableRooms = bridgeSettings.customRooms,
                                             onSelectRoom = { chosenRoom ->
-                                                selectedRoomFilter = chosenRoom
+                                                viewModel.selectRoomFilter(chosenRoom)
                                             },
                                             onRequestCreateNewRoom = {
                                                 pendingTileIdForNewRoom = null
@@ -1875,7 +1880,7 @@ fun GoogleHomeLauncherScreen(
                                                 ) {
                                                     selectedTileIdForMove = null
                                                     selectedCardIdForMove = if (isEditMode && selectedCardIdForMove == card.id) null else card.id
-                                                    isEditMode = true
+                                                    viewModel.setEditMode(true)
                                                 }
                                             },
                                             onTriggerVoicePrompt = {
@@ -1954,7 +1959,7 @@ fun GoogleHomeLauncherScreen(
                                             ) {
                                                 selectedTileIdForMove = null
                                                 selectedCardIdForMove = if (isEditMode && selectedCardIdForMove == card.id) null else card.id
-                                                isEditMode = true
+                                                viewModel.setEditMode(true)
                                             }
                                         },
                                         onUpdateBridgeSettings = { updatedBridge ->
@@ -1972,7 +1977,7 @@ fun GoogleHomeLauncherScreen(
                                                 ) {
                                                     selectedTileIdForMove = null
                                                     selectedCardIdForMove = if (isEditMode && selectedCardIdForMove == card.id) null else card.id
-                                                    isEditMode = true
+                                                    viewModel.setEditMode(true)
                                                 }
                                             },
                                             modifier = Modifier.fillMaxSize()
@@ -2722,10 +2727,10 @@ fun GoogleHomeLauncherScreen(
                                                                                 commitPlacementsToTiles(tiles, currentBasePlacements)
                                                                                 selectedCardIdForMove = null
                                                                                 selectedTileIdForMove = tile.id
-                                                                                isEditMode = true
+                                                                                viewModel.setEditMode(true)
                                                                             }
                                                                         } else {
-                                                                            isEditMode = false
+                                                                            viewModel.setEditMode(false)
                                                                             selectedTileIdForMove = null
                                                                             selectedCardIdForMove = null
                                                                             persistDashboardCardLayout()
@@ -3219,7 +3224,7 @@ fun GoogleHomeLauncherScreen(
                                         handleUpdateAnyTile(tiles[tIdx].copy(roomOrSubtitle = clean))
                                     }
                                 } else {
-                                    selectedRoomFilter = clean
+                                    viewModel.selectRoomFilter(clean)
                                 }
                             }
                             pendingTileIdForNewRoom = null
@@ -3305,19 +3310,19 @@ fun GoogleHomeLauncherScreen(
 
         if (showSetupWizard) {
             SetupWizardFullScreen(
-                tiles = tiles,
+                tiles = tiles.toMutableList(),
                 bridgeSettings = bridgeSettings,
-                automationRulesExternal = automationRules,
+                automationRulesExternal = automationRules.toMutableList(),
                 initialSection = wizardInitialSection,
                 onSaveAll = { updatedBridge ->
                     lastWizardDismissTimeMs = System.currentTimeMillis()
                     expandedFeedTile = null
-                    bridgeSettings = updatedBridge
+                    viewModel.updateBridgeSettings(context, updatedBridge)
                     onAppBehaviorSettingsChanged(updatedBridge)
                     if (!selectedRoomFilter.equals("All Rooms", ignoreCase = true) &&
                         tiles.any { it.isVisible && !it.roomOrSubtitle.equals(selectedRoomFilter, ignoreCase = true) }
                     ) {
-                        selectedRoomFilter = "All Rooms"
+                        viewModel.selectRoomFilter("All Rooms")
                     }
                     commitUnifiedCardAndTileCollisions(
                         context = context,
@@ -3343,7 +3348,7 @@ fun GoogleHomeLauncherScreen(
                     ) {
                         selectedCardIdForMove = null
                         selectedTileIdForMove = null
-                        isEditMode = true
+                        viewModel.setEditMode(true)
                     }
                 },
                 onSpeak = onSpeak,
@@ -3364,7 +3369,7 @@ fun GoogleHomeLauncherScreen(
                     if (!selectedRoomFilter.equals("All Rooms", ignoreCase = true) &&
                         tiles.any { it.isVisible && !it.roomOrSubtitle.equals(selectedRoomFilter, ignoreCase = true) }
                     ) {
-                        selectedRoomFilter = "All Rooms"
+                        viewModel.selectRoomFilter("All Rooms")
                     }
                     commitUnifiedCardAndTileCollisions(
                         context = context,
